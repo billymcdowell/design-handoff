@@ -235,6 +235,30 @@ export default function FrameViewerPage({
 
   const isOlderVersion = frameVersions.length > 1 && frameVersions[0]?.id !== frameId
 
+  // Fit frame into the canvas once per frame. The transform node must keep its
+  // design-pixel size (never flex-shrink) so layer overlays stay aligned with
+  // the screenshot — scale only via the zoom transform.
+  useEffect(() => {
+    const el = canvasRef.current
+    if (!el) return
+
+    let fitted = false
+    const ro = new ResizeObserver(() => {
+      if (fitted || el.clientWidth === 0 || el.clientHeight === 0) return
+      fitted = true
+      const pad = 64
+      const availW = Math.max(1, el.clientWidth - pad)
+      const availH = Math.max(1, el.clientHeight - pad)
+      const next = Math.min(1, availW / baseWidth, availH / baseHeight)
+      setZoom(Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.round(next * 100) / 100)))
+      setPanX(0)
+      setPanY(0)
+      ro.disconnect()
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [baseWidth, baseHeight, frameId])
+
   // Reset pan when zoom returns to 1.
   useEffect(() => {
     if (zoom === 1) {
@@ -522,88 +546,98 @@ export default function FrameViewerPage({
             onMouseLeave={endDrag}
           >
             <div className="flex h-full w-full items-center justify-center p-8">
+              {/* Outer box is the *visual* size so flex centering works at any zoom.
+                  Inner box keeps design-pixel dimensions; scale is applied here. */}
               <div
-                data-frame-transform
-                className="relative shadow-xl"
+                className="relative shrink-0"
                 style={{
-                  width: baseWidth,
-                  height: baseHeight,
-                  transform: `translate(${panX}px, ${panY}px) scale(${zoom})`,
-                  transformOrigin: "top left",
+                  width: baseWidth * zoom,
+                  height: baseHeight * zoom,
                 }}
               >
-                <img
-                  src={frameImageSrc(frame)}
-                  alt={frame.name}
-                  draggable={false}
-                  className="block h-full w-full select-none"
-                  style={{ width: baseWidth, height: baseHeight, objectFit: "contain" }}
-                />
+                <div
+                  data-frame-transform
+                  className="absolute top-0 left-0 shadow-xl"
+                  style={{
+                    width: baseWidth,
+                    height: baseHeight,
+                    transform: `translate(${panX}px, ${panY}px) scale(${zoom})`,
+                    transformOrigin: "top left",
+                  }}
+                >
+                  <img
+                    src={frameImageSrc(frame)}
+                    alt={frame.name}
+                    draggable={false}
+                    className="pointer-events-none block max-w-none select-none"
+                    style={{ width: baseWidth, height: baseHeight }}
+                  />
 
-                {/* Layer overlays */}
-                {visibleLayers.map((layer) => {
-                  const isSelected = selectedLayer?.id === layer.id
-                  const isMenuHovered = menuHoveredLayerId === layer.id
-                  return (
-                    <div
-                      key={layer.id}
-                      data-layer-overlay
-                      className={`absolute transition-colors ${
-                        isSelected
-                          ? "bg-blue-500/10 ring-2 ring-blue-500"
-                          : isMenuHovered
-                            ? "bg-yellow-400/20 ring-2 ring-yellow-400"
-                            : "hover:bg-blue-400/5 hover:ring-2 hover:ring-blue-400/50"
-                      } ${layer.type === "TEXT" ? "cursor-text" : "cursor-pointer"}`}
-                      style={{
-                        left: layer.x || 0,
-                        top: layer.y || 0,
-                        width: layer.width || 0,
-                        height: layer.height || 0,
-                      }}
-                      onClick={(e) => handleLayerClick(layer, e)}
-                      onDoubleClick={(e) => handleLayerDoubleClick(layer, e)}
-                      onMouseEnter={() => setHoveredLayer(layer)}
-                      onMouseLeave={() => setHoveredLayer((h) => (h?.id === layer.id ? null : h))}
-                      title={layer.type === "TEXT" ? "Double-click to copy text" : undefined}
-                    />
-                  )
-                })}
+                  {/* Layer overlays */}
+                  {visibleLayers.map((layer) => {
+                    const isSelected = selectedLayer?.id === layer.id
+                    const isMenuHovered = menuHoveredLayerId === layer.id
+                    return (
+                      <div
+                        key={layer.id}
+                        data-layer-overlay
+                        className={`absolute transition-colors ${
+                          isSelected
+                            ? "bg-blue-500/10 ring-2 ring-blue-500"
+                            : isMenuHovered
+                              ? "bg-yellow-400/20 ring-2 ring-yellow-400"
+                              : "hover:bg-blue-400/5 hover:ring-2 hover:ring-blue-400/50"
+                        } ${layer.type === "TEXT" ? "cursor-text" : "cursor-pointer"}`}
+                        style={{
+                          left: layer.x || 0,
+                          top: layer.y || 0,
+                          width: layer.width || 0,
+                          height: layer.height || 0,
+                        }}
+                        onClick={(e) => handleLayerClick(layer, e)}
+                        onDoubleClick={(e) => handleLayerDoubleClick(layer, e)}
+                        onMouseEnter={() => setHoveredLayer(layer)}
+                        onMouseLeave={() => setHoveredLayer((h) => (h?.id === layer.id ? null : h))}
+                        title={layer.type === "TEXT" ? "Double-click to copy text" : undefined}
+                      />
+                    )
+                  })}
 
-                {/* Padding overlays for hovered layer */}
-                {hoveredLayer && hoveredPadding && (
-                  <PaddingOverlay layer={hoveredLayer} padding={hoveredPadding} />
-                )}
+                  {/* Padding overlays for hovered layer */}
+                  {hoveredLayer && hoveredPadding && (
+                    <PaddingOverlay layer={hoveredLayer} padding={hoveredPadding} />
+                  )}
 
-                {/* Distance measurement */}
-                {distance && (
-                  <svg
-                    className="pointer-events-none absolute inset-0 overflow-visible"
-                    width={baseWidth}
-                    height={baseHeight}
-                  >
-                    <line
-                      x1={distance.point1.x}
-                      y1={distance.point1.y}
-                      x2={distance.point2.x}
-                      y2={distance.point2.y}
-                      stroke="#ef4444"
-                      strokeWidth={1}
-                      strokeDasharray="4 3"
-                      vectorEffect="non-scaling-stroke"
-                    />
-                    <g
-                      transform={`translate(${(distance.point1.x + distance.point2.x) / 2}, ${
-                        (distance.point1.y + distance.point2.y) / 2
-                      }) scale(${1 / zoom})`}
+                  {/* Distance measurement */}
+                  {distance && (
+                    <svg
+                      className="pointer-events-none absolute inset-0 overflow-visible"
+                      width={baseWidth}
+                      height={baseHeight}
                     >
-                      <rect x={-16} y={-9} width={32} height={18} rx={4} fill="#ef4444" />
-                      <text x={0} y={0} fill="white" fontSize={11} textAnchor="middle" dominantBaseline="central">
-                        {distance.distance}px
-                      </text>
-                    </g>
-                  </svg>
-                )}
+                      <line
+                        x1={distance.point1.x}
+                        y1={distance.point1.y}
+                        x2={distance.point2.x}
+                        y2={distance.point2.y}
+                        stroke="#ef4444"
+                        strokeWidth={1}
+                        strokeDasharray="4 3"
+                        vectorEffect="non-scaling-stroke"
+                      />
+                      <g
+                        transform={`translate(${(distance.point1.x + distance.point2.x) / 2}, ${
+                          (distance.point1.y + distance.point2.y) / 2
+                        }) scale(${1 / zoom})`}
+                      >
+                        <rect x={-16} y={-9} width={32} height={18} rx={4} fill="#ef4444" />
+                        <text x={0} y={0} fill="white" fontSize={11} textAnchor="middle" dominantBaseline="central">
+                          {distance.distance}px
+                        </text>
+                      </g>
+                    </svg>
+                  )}
+                </div>
               </div>
             </div>
           </div>

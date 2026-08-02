@@ -23,26 +23,27 @@ records API with cookie/token auth. The schema is applied by
 
 ## Collections
 
-Built-in `users` auth collection is used for login (email/password). Users are
-created in the PocketBase Admin UI — no signup flow. Each user has a **role**:
+Built-in auth collections:
 
-| Role | Capabilities |
-| --- | --- |
-| `super` | Create / edit / delete projects & frames; publish from the Figma plugin |
-| `developer` | View all projects, frames, layers, and foundations; copy specs (read-only) |
+| Who | Collection | Login |
+| --- | --- | --- |
+| Designers / admins | `_superusers` | **Same credentials as PocketBase Admin** (`/_/`) — full create/edit in the app |
+| Developers | `users` | App-only accounts (read + copy; no create/edit/delete) |
 
-Existing users are promoted to `super` by the roles migration; new accounts
-default to `developer` (set `role` in Admin when creating designers). Users
-cannot change their own `role` via the API.
-
-Five custom collections:
+Create developer accounts in Admin → Collections → `users`. Optional `role`
+field (`super` \| `developer`) still works for rare cases where someone should
+manage content without being a PocketBase Admin; prefer Admin credentials for
+managers.
 
 ```
-users ─┐ owns (super writers; all authed users can read)
-       ├─< projects ─┬─< frames ─< layers ─o layer_details (1:1)
-       │             │              └─< layers (self: parent)
-       └─o foundations (1:1)
+_superusers  →  app managers (API rules bypassed)
+users        →  developers (read-only) + optional role=super
+       └─ owns projects / foundations (relation targets)
 ```
+
+`projects.owner` / `foundations.owner` always reference a `users` id. When an
+Admin creates a project, the app links (or creates) a `users` row with the same
+email for that relation.
 
 ### 1. `projects`
 
@@ -252,10 +253,14 @@ All authenticated users can **list/view** every record. Mutations require
 3. Leave **Delete missing collections** unchecked (keeps the built-in `users` collection and merges fields)
 4. Confirm — this adds `projects` / `frames` / `layers` / `layer_details` / `foundations` **and** the `users.role` field (`super` | `developer`)
 
-Then create login users in Admin (`/_/` → Collections → `users` → New).
-Set **role** to `super` for designers (create/edit) or `developer` for
-read-only viewers. No signup / password-reset flows exist by design.
+Then create login users as needed:
 
-> If you already have users before import, open each record and set **role**
-> after importing (existing accounts are not auto-promoted on import — only the
-> migrations path does that).
+- **Managers:** use your existing PocketBase Admin (`_superusers`) account — same
+  email/password as `/_/`. No separate “super” app user required.
+- **Developers:** Admin → Collections → `users` → New (role `developer`).
+
+No public signup / password-reset flows exist by design.
+
+> If you already have `users` rows from before roles were added, open each
+> record and set **role** after importing when using the optional `role=super`
+> path (Admin login does not need this).

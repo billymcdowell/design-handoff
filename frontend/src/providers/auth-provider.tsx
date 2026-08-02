@@ -1,5 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useEffect, useMemo, useState } from "react"
+import { refreshAuthSession } from "@/lib/auth"
 import { pb } from "@/lib/pocketbase"
 import { canManageContent, getUserRole } from "@/lib/permissions"
 import type { User, UserRole } from "@/lib/types"
@@ -33,8 +34,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async function hydrate() {
       try {
         if (pb.authStore.isValid) {
-          // Refresh so role (and other fields) match the latest Admin changes.
-          await pb.collection("users").authRefresh()
+          await refreshAuthSession()
         }
       } catch {
         pb.authStore.clear()

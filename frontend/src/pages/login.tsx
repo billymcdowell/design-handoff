@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { useNavigate } from "react-router"
 import { Loader2 } from "lucide-react"
-import { pb } from "@/lib/pocketbase"
+import { signInWithPassword } from "@/lib/auth"
 import { toast } from "@/lib/toast"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -18,7 +18,7 @@ export default function LoginPage() {
     e.preventDefault()
     setIsLoading(true)
     try {
-      await pb.collection("users").authWithPassword(email, password)
+      await signInWithPassword(email, password)
       toast.success("Welcome back")
       navigate("/projects")
     } catch {
@@ -33,7 +33,9 @@ export default function LoginPage() {
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
           <CardTitle className="text-xl">Welcome back</CardTitle>
-          <CardDescription>Login with your credentials</CardDescription>
+          <CardDescription>
+            Use your PocketBase Admin credentials, or a developer account
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={onSubmit} className="space-y-4">

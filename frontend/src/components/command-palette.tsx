@@ -44,10 +44,9 @@ export function CommandPalette() {
     }
     const t = setTimeout(async () => {
       try {
-        const owner = pb.authStore.record!.id
         const q = escapeFilterValue(query)
         const [projects, frames] = await Promise.all([
-          pb.collection("projects").getList(1, 5, { filter: `owner = "${owner}" && name ~ "${q}"` }),
+          pb.collection("projects").getList(1, 5, { filter: `name ~ "${q}"` }),
           pb.collection("frames").getList(1, 10, { filter: `name ~ "${q}"` }),
         ])
         setResults([

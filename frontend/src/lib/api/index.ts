@@ -1,9 +1,10 @@
 import { pb } from "../pocketbase"
+import { resolveOwnerUserId } from "../auth"
 import { framesByNameFilter, projectFilter, escapeFilterValue } from "../pb-filter"
 import type { Foundation, Frame, Layer, LayerDetail, Project } from "../types"
 
 // ─── Projects ───────────────────────────────────────────────
-/** All projects visible to the signed-in user (supers + developers). */
+/** All projects visible to the signed-in user (admins + developers). */
 export async function getUserProjects(): Promise<Project[]> {
   if (!pb.authStore.isValid) return []
   return pb.collection("projects").getFullList<Project>({
@@ -23,8 +24,9 @@ export async function createUserProject(data: {
   figma_file_url?: string
   frame_count?: number
 }): Promise<Project> {
+  const owner = await resolveOwnerUserId({ createIfMissing: true })
   return pb.collection("projects").create<Project>({
-    owner: pb.authStore.record!.id,
+    owner,
     name: data.name ?? "Untitled",
     thumbnail_url: data.thumbnail_url,
     figma_file_url: data.figma_file_url,
@@ -146,17 +148,17 @@ export async function getLayerPaddingMap(
   return map
 }
 
-// ─── Foundations (readable by all; written by supers) ───────
+// ─── Foundations (readable by all; written by admins) ───────
 export async function getUserFoundations(): Promise<Foundation | null> {
   if (!pb.authStore.isValid) return null
   try {
-    // Prefer the signed-in user's own row (supers who publish).
+    const ownerId = await resolveOwnerUserId()
     return await pb.collection("foundations").getFirstListItem<Foundation>(
-      `owner = "${pb.authStore.record!.id}"`,
+      `owner = "${ownerId}"`,
       { requestKey: null },
     )
   } catch {
-    // Developers (and supers without a row yet) see the latest shared set.
+    // Developers (and admins without a row yet) see the latest shared set.
     try {
       const rows = await pb.collection("foundations").getList<Foundation>(1, 1, {
         sort: "-updated",

@@ -20,15 +20,15 @@ cd design-handoff
 docker compose up -d --build
 ```
 
-On **first boot**, PocketBase prints a one-time installer URL in the logs. Copy it and open it in your browser (replace `0.0.0.0` with `localhost`):
+On **first boot** (only if no admin exists yet), PocketBase prints a one-time installer URL:
 
 ```bash
-docker compose logs | grep pbinstall
+docker compose logs | grep 'Launch the URL' -A1
 # → http://0.0.0.0:8090/_/#/pbinstall/<token>
 # open http://localhost:8090/_/#/pbinstall/<token>
 ```
 
-That page lets you create your own admin email/password. After that:
+If you already have a `.env` with `PB_SUPERUSER_EMAIL` / `PB_SUPERUSER_PASSWORD`, the admin is created automatically and **no installer URL appears** — just open http://localhost:8090/_/ and sign in with those credentials.
 
 | URL | What |
 | --- | --- |
@@ -128,6 +128,18 @@ cd ../backend && ./pocketbase serve
 ```
 
 Schema is applied by `backend/pb_migrations` on first start. See [`backend/SCHEMA.md`](backend/SCHEMA.md).
+
+---
+
+## MCP server (AI specs)
+
+A local stdio [MCP](https://modelcontextprotocol.io/) server in [`mcp/`](mcp/) lets an AI pull full frame specs (layout, styles, typography, CSS/Tailwind/React) from a design-handoff `/frame/{frameId}` URL.
+
+```bash
+cd mcp && npm install
+```
+
+Configure Cursor with `DESIGN_HANDOFF_URL` + `DESIGN_HANDOFF_TOKEN` — see [`mcp/README.md`](mcp/README.md).
 
 ---
 
