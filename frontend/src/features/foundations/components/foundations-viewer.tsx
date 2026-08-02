@@ -96,7 +96,8 @@ function RawJson({ data }: { data: unknown }) {
 
 // ─── Main ───────────────────────────────────────────────────
 export function FoundationsViewer({ data }: { data: FoundationsData }) {
-  const collections = Object.values(data.variables || {})
+  // Prefer map keys so multi-file merges with colliding Figma ids stay unique.
+  const collectionEntries = Object.entries(data.variables || {})
   const styles = data.styles || {}
 
   return (
@@ -107,12 +108,14 @@ export function FoundationsViewer({ data }: { data: FoundationsData }) {
       </TabsList>
 
       <TabsContent value="variables" className="mt-4">
-        {collections.length === 0 ? (
-          <p className="text-muted-foreground text-sm">No variables in this project.</p>
+        {collectionEntries.length === 0 ? (
+          <p className="text-muted-foreground text-sm">
+            No variables published yet.
+          </p>
         ) : (
           <Accordion multiple className="w-full">
-            {collections.map((collection) => (
-              <AccordionItem key={collection.id} value={collection.id}>
+            {collectionEntries.map(([key, collection]) => (
+              <AccordionItem key={key} value={key}>
                 <AccordionTrigger>
                   <span className="flex items-center gap-2">
                     {collection.name}

@@ -12,9 +12,11 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
 import type { Project } from "@/lib/types"
+import { useAuth } from "@/providers/auth-provider"
 
 export function AppSidebar({ projects }: { projects: Project[] }) {
   const { pathname } = useLocation()
+  const { canManage } = useAuth()
 
   return (
     <Sidebar>
@@ -28,15 +30,27 @@ export function AppSidebar({ projects }: { projects: Project[] }) {
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  render={<Link to="/projects?create=1" />}
-                  isActive={pathname === "/projects"}
-                >
-                  <Plus />
-                  <span>New Project</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
+              {canManage ? (
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    render={<Link to="/projects?create=1" />}
+                    isActive={pathname === "/projects"}
+                  >
+                    <Plus />
+                    <span>New Project</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ) : (
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    render={<Link to="/projects" />}
+                    isActive={pathname === "/projects"}
+                  >
+                    <Folder />
+                    <span>Projects</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
               <SidebarMenuItem>
                 <SidebarMenuButton
                   render={<Link to="/foundations" />}

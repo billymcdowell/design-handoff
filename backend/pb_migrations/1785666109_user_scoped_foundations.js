@@ -5,7 +5,15 @@
  */
 migrate(
   (app) => {
-    const collection = app.findCollectionByNameOrId("project_foundations")
+    // Fresh installs already get `foundations` from the initial collections
+    // snapshot — skip this legacy rename when project_foundations is gone.
+    let collection
+    try {
+      collection = app.findCollectionByNameOrId("project_foundations")
+    } catch (_) {
+      return
+    }
+
     const projectsCol = app.findCollectionByNameOrId("projects")
 
     // 1. Add owner relation; relax project so we can remap rows.

@@ -1,0 +1,26 @@
+# Default: named Docker volume (survives container recreate; wiped by `docker compose down -v`).
+#
+# For a host-folder bind mount instead (easy backups / inspect files on disk),
+# see docker-compose.bind.yml:
+#   docker compose -f docker-compose.yml -f docker-compose.bind.yml up -d
+
+services:
+  design-handoff:
+    build: .
+    image: design-handoff:latest
+    ports:
+      - "${PORT:-8090}:8090"
+    volumes:
+      # Entire PocketBase data dir:
+      #   pb_data/data.db (+ auxiliary.db)  → collections, users, records
+      #   pb_data/storage/                 → uploaded frame images & thumbnails
+      - pb_data:/pb/pb_data
+    environment:
+      # Optional — skip the first-run installer (CI / automation):
+      PB_SUPERUSER_EMAIL: ${PB_SUPERUSER_EMAIL:-}
+      PB_SUPERUSER_PASSWORD: ${PB_SUPERUSER_PASSWORD:-}
+    restart: unless-stopped
+
+volumes:
+  pb_data:
+    name: design-handoff-pb-data

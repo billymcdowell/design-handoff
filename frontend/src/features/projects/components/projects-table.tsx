@@ -34,6 +34,7 @@ import { createUserProject, updateUserProject, deleteUserProject } from "@/lib/a
 import { projectThumbnailSrc } from "@/lib/files"
 import { toast } from "@/lib/toast"
 import type { Project } from "@/lib/types"
+import { useAuth } from "@/providers/auth-provider"
 
 export function ProjectsTable({
   projects,
@@ -44,6 +45,7 @@ export function ProjectsTable({
   onRefetch: () => void
   onCreate: () => void
 }) {
+  const { canManage } = useAuth()
   const [editing, setEditing] = useState<Project | null>(null)
   const [deleting, setDeleting] = useState<Project | null>(null)
 
@@ -52,9 +54,11 @@ export function ProjectsTable({
       {projects.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-16 text-center">
           <p className="text-muted-foreground mb-4 text-sm">
-            No projects found. Create your first project to get started.
+            {canManage
+              ? "No projects found. Create your first project to get started."
+              : "No projects yet. Ask a designer to create one."}
           </p>
-          <Button onClick={onCreate}>New Project</Button>
+          {canManage && <Button onClick={onCreate}>New Project</Button>}
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -62,6 +66,7 @@ export function ProjectsTable({
             <ProjectCard
               key={project.id}
               project={project}
+              canManage={canManage}
               onEdit={() => setEditing(project)}
               onDelete={() => setDeleting(project)}
             />
@@ -69,52 +74,58 @@ export function ProjectsTable({
         </div>
       )}
 
-      <ProjectFormDialog
-        open={!!editing}
-        project={editing ?? undefined}
-        onOpenChange={(o) => !o && setEditing(null)}
-        onSaved={onRefetch}
-      />
+      {canManage && (
+        <>
+          <ProjectFormDialog
+            open={!!editing}
+            project={editing ?? undefined}
+            onOpenChange={(o) => !o && setEditing(null)}
+            onSaved={onRefetch}
+          />
 
-      <AlertDialog open={!!deleting} onOpenChange={(o) => !o && setDeleting(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete “{deleting?.name}”?</AlertDialogTitle>
-            <AlertDialogDescription>
-              All frames and layers will also be deleted. This cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={async (e) => {
-                e.preventDefault()
-                if (!deleting) return
-                const ok = await deleteUserProject(deleting.id)
-                if (ok) {
-                  toast.success("Project deleted")
-                  setDeleting(null)
-                  onRefetch()
-                } else {
-                  toast.error("Failed to delete project")
-                }
-              }}
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+          <AlertDialog open={!!deleting} onOpenChange={(o) => !o && setDeleting(null)}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete “{deleting?.name}”?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  All frames and layers will also be deleted. This cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={async (e) => {
+                    e.preventDefault()
+                    if (!deleting) return
+                    const ok = await deleteUserProject(deleting.id)
+                    if (ok) {
+                      toast.success("Project deleted")
+                      setDeleting(null)
+                      onRefetch()
+                    } else {
+                      toast.error("Failed to delete project")
+                    }
+                  }}
+                >
+                  Delete
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </>
+      )}
     </>
   )
 }
 
 function ProjectCard({
   project,
+  canManage,
   onEdit,
   onDelete,
 }: {
   project: Project
+  canManage: boolean
   onEdit: () => void
   onDelete: () => void
 }) {
@@ -137,21 +148,23 @@ function ProjectCard({
               {project.name}
             </Link>
           </CardTitle>
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <Button variant="ghost" size="icon-sm" aria-label="Project actions">
-                  <MoreVertical className="size-4" />
-                </Button>
-              }
-            />
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={onEdit}>Edit</DropdownMenuItem>
-              <DropdownMenuItem variant="destructive" onClick={onDelete}>
-                Delete
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {canManage && (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <Button variant="ghost" size="icon-sm" aria-label="Project actions">
+                    <MoreVertical className="size-4" />
+                  </Button>
+                }
+              />
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={onEdit}>Edit</DropdownMenuItem>
+                <DropdownMenuItem variant="destructive" onClick={onDelete}>
+                  Delete
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
       </CardHeader>
       <CardFooter className="text-muted-foreground flex items-center justify-between text-xs">

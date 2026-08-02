@@ -3,10 +3,10 @@ import { framesByNameFilter, projectFilter, escapeFilterValue } from "../pb-filt
 import type { Foundation, Frame, Layer, LayerDetail, Project } from "../types"
 
 // ─── Projects ───────────────────────────────────────────────
+/** All projects visible to the signed-in user (supers + developers). */
 export async function getUserProjects(): Promise<Project[]> {
   if (!pb.authStore.isValid) return []
   return pb.collection("projects").getFullList<Project>({
-    filter: `owner = "${pb.authStore.record!.id}"`,
     sort: "-updated",
     // Allow concurrent callers (layout + page) without autocancelling each other.
     requestKey: null,
@@ -146,15 +146,25 @@ export async function getLayerPaddingMap(
   return map
 }
 
-// ─── Foundations (user-scoped — shared across all projects) ─
+// ─── Foundations (readable by all; written by supers) ───────
 export async function getUserFoundations(): Promise<Foundation | null> {
   if (!pb.authStore.isValid) return null
   try {
+    // Prefer the signed-in user's own row (supers who publish).
     return await pb.collection("foundations").getFirstListItem<Foundation>(
       `owner = "${pb.authStore.record!.id}"`,
       { requestKey: null },
     )
   } catch {
-    return null
+    // Developers (and supers without a row yet) see the latest shared set.
+    try {
+      const rows = await pb.collection("foundations").getList<Foundation>(1, 1, {
+        sort: "-updated",
+        requestKey: null,
+      })
+      return rows.items[0] ?? null
+    } catch {
+      return null
+    }
   }
 }

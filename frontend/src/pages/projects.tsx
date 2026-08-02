@@ -9,22 +9,25 @@ import {
   ProjectFormDialog,
 } from "@/features/projects/components/projects-table"
 import type { AppLayoutContext } from "@/components/layout/app-layout"
+import { useAuth } from "@/providers/auth-provider"
 
 export default function ProjectsPage() {
   const { data: projects, isLoading, refetch } = useOutletContext<AppLayoutContext>()
+  const { canManage } = useAuth()
   const [query, setQuery] = useState("")
   const [createOpen, setCreateOpen] = useState(false)
   const [searchParams, setSearchParams] = useSearchParams()
 
   // Open the create dialog when arriving via /projects?create=1 (sidebar link).
   useEffect(() => {
+    if (!canManage) return
     if (searchParams.get("create") === "1") {
       setCreateOpen(true)
       const next = new URLSearchParams(searchParams)
       next.delete("create")
       setSearchParams(next, { replace: true })
     }
-  }, [searchParams, setSearchParams])
+  }, [searchParams, setSearchParams, canManage])
 
   const filtered = useMemo(() => {
     const list = projects ?? []
@@ -37,10 +40,12 @@ export default function ProjectsPage() {
     <div className="mx-auto w-full max-w-6xl space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Projects</h1>
-        <Button onClick={() => setCreateOpen(true)}>
-          <Plus className="size-4" />
-          New Project
-        </Button>
+        {canManage && (
+          <Button onClick={() => setCreateOpen(true)}>
+            <Plus className="size-4" />
+            New Project
+          </Button>
+        )}
       </div>
 
       <SearchInput value={query} onChange={setQuery} placeholder="Search projects…" />
@@ -59,11 +64,13 @@ export default function ProjectsPage() {
         />
       )}
 
-      <ProjectFormDialog
-        open={createOpen}
-        onOpenChange={setCreateOpen}
-        onSaved={refetch}
-      />
+      {canManage && (
+        <ProjectFormDialog
+          open={createOpen}
+          onOpenChange={setCreateOpen}
+          onSaved={refetch}
+        />
+      )}
     </div>
   )
 }

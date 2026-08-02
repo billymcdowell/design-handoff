@@ -1,15 +1,9 @@
 /// <reference path="../pb_data/types.d.ts" />
 
-// SPA fallback: serve the built index.html for any non-API, non-file route so
-// React Router's client-side routes (e.g. /projects/:id) work on refresh.
-routerAdd("GET", "/{path...}", (e) => {
-  const p = e.request.url.path
-
-  // Let the API and any request for a real file (has a dot) fall through to
-  // PocketBase's own static file serving.
-  if (p.startsWith("/api/") || p.startsWith("/_/") || p.includes(".")) {
-    return e.next()
-  }
-
-  return e.fileFS($os.dirFS(`${__hooks}/../pb_public`), "index.html")
-})
+// Serve the Vite build from pb_public. The second arg enables index.html
+// fallback so React Router client routes (e.g. /projects/:id) work on refresh.
+//
+// Important: a custom catch-all that only calls e.next() for dotted paths
+// intercepts PocketBase's built-in static handler and returns empty 200s
+// (no Content-Type) for JS/CSS — which browsers reject as MIME failures.
+routerAdd("GET", "/{path...}", $apis.static(`${__hooks}/../pb_public`, true))

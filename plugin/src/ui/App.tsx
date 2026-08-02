@@ -28,6 +28,7 @@ export function App() {
     null,
   )
   const [startTime, setStartTime] = useState<number | null>(null)
+  const [foundationsNote, setFoundationsNote] = useState<string | null>(null)
 
   // Refs so the (stable) message handler reads the latest values.
   const tokenRef = useRef<string | null>(null)
@@ -142,9 +143,20 @@ export function App() {
         })
         break
 
-      case "FOUNDATIONAL_UPLOAD_COMPLETE":
+      case "FOUNDATIONAL_UPLOAD_COMPLETE": {
         setIsExporting(false)
+        if (msg.success as boolean) {
+          const fileName = (msg.fileName as string | undefined) || "this file"
+          const changeLabel =
+            (msg.changeLabel as string | undefined) || "no changes"
+          setFoundationsNote(
+            `Merged from “${fileName}” (${changeLabel}). Other Figma files’ tokens are kept.`,
+          )
+        } else {
+          setFoundationsNote(null)
+        }
         break
+      }
 
       default:
         break
@@ -210,6 +222,7 @@ export function App() {
 
   function handleExportFoundational() {
     setIsExporting(true)
+    setFoundationsNote(null)
     post({ type: "EXPORT_FOUNDATIONAL" })
   }
 
@@ -224,6 +237,7 @@ export function App() {
     setIsExporting(false)
     setAuthError(null)
     setInputToken("")
+    setFoundationsNote(null)
   }
 
   // ── View routing (7.3) ──────────────────────────────────────────────────────
@@ -252,6 +266,7 @@ export function App() {
       displayName={displayName || "User"}
       isPublishing={isPublishing}
       isExporting={isExporting}
+      foundationsNote={foundationsNote}
       onPublish={handlePublish}
       onExportFoundational={handleExportFoundational}
       onLogout={handleLogout}
@@ -322,6 +337,7 @@ function DashboardView(props: {
   displayName: string
   isPublishing: boolean
   isExporting: boolean
+  foundationsNote: string | null
   onPublish: () => void
   onExportFoundational: () => void
   onLogout: () => void
@@ -336,6 +352,7 @@ function DashboardView(props: {
     displayName,
     isPublishing,
     isExporting,
+    foundationsNote,
     onPublish,
     onExportFoundational,
     onLogout,
@@ -395,8 +412,14 @@ function DashboardView(props: {
       <button disabled={foundationalDisabled} onClick={onExportFoundational}>
         {isExporting
           ? "Uploading Foundations..."
-          : "Publish Variables & Styles (shared)"}
+          : "Publish Variables & Styles (merge)"}
       </button>
+      <p className="small muted">
+        Merges this Figma file’s local variables &amp; styles into your shared
+        foundations. Re-publish from other files to add their tokens without
+        wiping this one.
+      </p>
+      {foundationsNote && <p className="small">{foundationsNote}</p>}
 
       <div className="spacer" />
       <div className="row between small muted">

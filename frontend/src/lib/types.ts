@@ -11,11 +11,15 @@ export const FIGMA_NODE_TYPES = [
 
 export type LayerType = (typeof FIGMA_NODE_TYPES)[number]
 
+export type UserRole = "super" | "developer"
+
 export interface User extends RecordModel {
   email: string
   name?: string
   avatar?: string
   verified?: boolean
+  /** `super` can mutate; `developer` is read-only (view + copy). */
+  role?: UserRole
 }
 
 export interface Project extends RecordModel {
@@ -110,7 +114,32 @@ export interface Foundation extends RecordModel {
   styles_count: number
 }
 
+export type FoundationSource = {
+  fileKey: string
+  fileName: string
+  updatedAt: string
+  variables?: FoundationsData["variables"]
+  styles?: FoundationsData["styles"]
+}
+
+export type FoundationHistorySummary = {
+  added: string[]
+  removed: string[]
+  changed: string[]
+}
+
+export type FoundationHistoryEntry = {
+  id: string
+  at: string
+  fileKey: string
+  fileName: string
+  summary: FoundationHistorySummary
+}
+
 export type FoundationsData = {
+  /** Per-Figma-file slices; flat variables/styles are a merged view. */
+  sources?: Record<string, FoundationSource>
+  history?: FoundationHistoryEntry[]
   variables?: Record<
     string,
     {

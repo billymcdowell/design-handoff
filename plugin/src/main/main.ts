@@ -7,10 +7,14 @@ import type { BackendPayload, FoundationalExport } from "../types"
 import {
   countStyles,
   countVariables,
+  formatHistorySummary,
+  getFoundationFileIdentity,
   getFoundationalElements,
+  mergeFoundationsData,
 } from "./foundational"
 import { fetchProjectsFromApi, resolveProjectForPublish } from "./planLimits"
 import {
+  findFoundationRecord,
   resolveFoundationOwnerId,
   upsertFoundationRecord,
   validateAuthToken,
@@ -284,18 +288,37 @@ figma.ui.onmessage = async (msg: Msg) => {
         }
 
         const ownerId = await resolveFoundationOwnerId(token, check)
+        const { fileKey, fileName } = getFoundationFileIdentity()
+        const existing = await findFoundationRecord(token, ownerId)
+        const existingData = existing?.data ?? null
+
+        const { data: merged, historyEntry } = mergeFoundationsData(
+          existingData,
+          {
+            fileKey,
+            fileName,
+            variables: data.variables,
+            styles: data.styles,
+          },
+        )
 
         await upsertFoundationRecord(token, {
           owner: ownerId,
-          data,
-          variables_count: countVariables(data),
-          styles_count: countStyles(data),
+          data: merged,
+          variables_count: countVariables(merged),
+          styles_count: countStyles(merged),
         })
 
-        figma.notify("✅ Variables & Styles uploaded successfully!")
+        const changeLabel = formatHistorySummary(historyEntry.summary)
+        figma.notify(
+          `✅ Variables & Styles merged from “${fileName}” (${changeLabel})`,
+        )
         figma.ui.postMessage({
           type: "FOUNDATIONAL_UPLOAD_COMPLETE",
           success: true,
+          fileName,
+          summary: historyEntry.summary,
+          changeLabel,
         })
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)

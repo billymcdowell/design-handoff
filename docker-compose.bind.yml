@@ -1,0 +1,19 @@
+# Bind-mount PocketBase data to a folder on the host.
+#
+# Usage:
+#   mkdir -p ./data/pb_data
+#   docker compose -f docker-compose.yml -f docker-compose.bind.yml up -d --build
+#
+# After uploads, frame PNGs live under:
+#   ./data/pb_data/storage/
+# SQLite databases:
+#   ./data/pb_data/data.db
+#   ./data/pb_data/auxiliary.db
+#
+# Backup example:
+#   tar -czf design-handoff-backup.tgz -C ./data pb_data
+
+services:
+  design-handoff:
+    volumes:
+      - ./data/pb_data:/pb/pb_data

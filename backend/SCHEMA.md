@@ -24,10 +24,21 @@ records API with cookie/token auth. The schema is applied by
 ## Collections
 
 Built-in `users` auth collection is used for login (email/password). Users are
-created in the PocketBase Admin UI — no signup flow. Five custom collections:
+created in the PocketBase Admin UI — no signup flow. Each user has a **role**:
+
+| Role | Capabilities |
+| --- | --- |
+| `super` | Create / edit / delete projects & frames; publish from the Figma plugin |
+| `developer` | View all projects, frames, layers, and foundations; copy specs (read-only) |
+
+Existing users are promoted to `super` by the roles migration; new accounts
+default to `developer` (set `role` in Admin when creating designers). Users
+cannot change their own `role` via the API.
+
+Five custom collections:
 
 ```
-users ─┐ owns
+users ─┐ owns (super writers; all authed users can read)
        ├─< projects ─┬─< frames ─< layers ─o layer_details (1:1)
        │             │              └─< layers (self: parent)
        └─o foundations (1:1)
@@ -98,12 +109,14 @@ Token/style refs (optional, resolved at publish time):
 | Field | Type | Notes |
 | --- | --- | --- |
 | `owner` | relation → `users` | required, **unique**, cascade delete |
-| `data` | json | full Figma variables + styles export (see below) |
-| `variables_count` | number (int) | |
-| `styles_count` | number (int) | |
+| `data` | json | multi-file merged variables + styles + history (see below) |
+| `variables_count` | number (int) | count across the flattened merge |
+| `styles_count` | number (int) | count across the flattened merge |
 
-Publishing variables & styles from the plugin upserts this single record for the
-authenticated user. Every project reads the same foundations.
+Publishing variables & styles from the plugin **merges by Figma file key** into
+this single record for the authenticated user. Re-publishing from the same file
+replaces that file’s slice only; other files’ tokens are kept. Every project
+reads the same foundations.
 
 ---
 
@@ -137,7 +150,7 @@ frontend reads the PocketBase fields directly.
 | `layer.parentId` | `layers.parent` | `Layer.parent` |
 | `layerDetail` → `layers.id` | `layer_details.layer` | `LayerDetail.layer` |
 | `layerDetail.layout/styles/typography/code` | same-named json fields | same |
-| `FoundationalExport` | `foundations.data` | `Foundation.data` |
+| `FoundationalExport` (merged) | `foundations.data` | `Foundation.data` |
 
 **Layer upload order:** create layers breadth-first by depth so a child's
 `parent` can reference the already-created parent record's PocketBase id.
@@ -149,25 +162,56 @@ in the Admin UI to preserve Figma node ids directly.)
 
 ## `foundations.data` shape
 
+Multi-file merge. Each Figma file that publishes variables & styles is stored
+under `sources[<fileKey>]`. Flat `variables` / `styles` are a rebuilt merge for
+the Foundations viewer (collection keys become `` `${fileName} / ${name}` ``
+when more than one source is present; colliding style names get the same
+prefix). `history` is a capped changelog (last 50 uploads).
+
+Legacy rows with only flat `variables`/`styles` are wrapped into
+`sources.legacy` on the next plugin upload.
+
 ```jsonc
 {
-  "variables": {
-    "<collectionId>": {
-      "id": "…", "name": "Colors",
-      "modes": [{ "modeId": "m1", "name": "Default" }],
-      "variables": [
-        { "id": "v1", "name": "primary/500", "type": "COLOR",
-          "valuesByMode": { "m1": { "r": 37, "g": 99, "b": 235, "a": 1 } },
-          "description": "", "scopes": [], "codeSyntax": {} }
-      ]
+  "sources": {
+    "<fileKey>": {
+      "fileKey": "abc",
+      "fileName": "Design System",
+      "updatedAt": "2026-08-02T12:00:00.000Z",
+      "variables": {
+        "Colors": {
+          "id": "…", "name": "Colors",
+          "modes": [{ "modeId": "m1", "name": "Default" }],
+          "variables": [
+            { "id": "v1", "name": "primary/500", "type": "COLOR",
+              "valuesByMode": { "m1": { "r": 37, "g": 99, "b": 235, "a": 1 } },
+              "description": "", "scopes": [], "codeSyntax": {} }
+          ]
+        }
+      },
+      "styles": {
+        "paint":  [{ "id": "s1", "name": "Primary Fill", "type": "PAINT", "paints": [ … ] }],
+        "text":   [],
+        "effect": [],
+        "grid":   []
+      }
     }
   },
-  "styles": {
-    "paint":  [{ "id": "s1", "name": "Primary Fill", "type": "PAINT", "paints": [ … ] }],
-    "text":   [],
-    "effect": [],
-    "grid":   []
-  }
+  "variables": { /* flatten of all sources */ },
+  "styles": { /* flatten of all sources */ },
+  "history": [
+    {
+      "id": "h_…",
+      "at": "2026-08-02T12:00:00.000Z",
+      "fileKey": "abc",
+      "fileName": "Design System",
+      "summary": {
+        "added": ["Colors/primary/500"],
+        "removed": [],
+        "changed": ["Colors/secondary"]
+      }
+    }
+  ]
 }
 ```
 
@@ -176,19 +220,24 @@ alias → `{ type: "VARIABLE_ALIAS", id, name }`.
 
 ---
 
-## API access rules (owner-scoped)
+## API access rules (role-scoped)
 
-| Collection | List / View / Create / Update / Delete |
-| --- | --- |
-| `projects` | `owner = @request.auth.id` (create only needs an authed user) |
-| `frames` | `project.owner = @request.auth.id` |
-| `layers` | `frame.project.owner = @request.auth.id` |
-| `layer_details` | `layer.frame.project.owner = @request.auth.id` |
-| `foundations` | `owner = @request.auth.id` |
+All authenticated users can **list/view** every record. Mutations require
+`@request.auth.role = "super"`.
+
+| Collection | List / View | Create / Update / Delete |
+| --- | --- | --- |
+| `projects` | any authed user | super only (create also requires `owner = @request.auth.id`) |
+| `frames` | any authed user | super only |
+| `layers` | any authed user | super only |
+| `layer_details` | any authed user | super only |
+| `foundations` | any authed user | super only (and `owner = @request.auth.id` on write) |
 
 ---
 
 ## Applying the schema
+
+**Option A — migrations (local `pb_data`):**
 
 ```bash
 # from backend/, with the pocketbase binary present:
@@ -196,5 +245,17 @@ alias → `{ type: "VARIABLE_ALIAS", id, name }`.
 ./pocketbase serve         # admin at /_/ , API at /api/
 ```
 
-Then create a login user in the Admin UI (`/_/` → Collections → `users` → New).
-No signup / password-reset flows exist by design.
+**Option B — Admin UI import (fresh PocketBase):**
+
+1. Open Admin → **Settings → Import collections**
+2. Upload [`schema.json`](schema.json) (same contents as `pb_collections_import.json`)
+3. Leave **Delete missing collections** unchecked (keeps the built-in `users` collection and merges fields)
+4. Confirm — this adds `projects` / `frames` / `layers` / `layer_details` / `foundations` **and** the `users.role` field (`super` | `developer`)
+
+Then create login users in Admin (`/_/` → Collections → `users` → New).
+Set **role** to `super` for designers (create/edit) or `developer` for
+read-only viewers. No signup / password-reset flows exist by design.
+
+> If you already have users before import, open each record and set **role**
+> after importing (existing accounts are not auto-promoted on import — only the
+> migrations path does that).

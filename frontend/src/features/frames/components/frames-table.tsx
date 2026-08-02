@@ -34,6 +34,7 @@ import { frameImageSrc } from "@/lib/files"
 import { frameUploaderLabel } from "@/lib/frame-utils"
 import { toast } from "@/lib/toast"
 import type { Frame } from "@/lib/types"
+import { useAuth } from "@/providers/auth-provider"
 
 export function FramesTable({
   frames,
@@ -45,6 +46,7 @@ export function FramesTable({
   onRefetch: () => void
 }) {
   const navigate = useNavigate()
+  const { canManage } = useAuth()
   const [editing, setEditing] = useState<Frame | null>(null)
   const [deleting, setDeleting] = useState<Frame | null>(null)
 
@@ -90,10 +92,14 @@ export function FramesTable({
                     <DropdownMenuItem onClick={() => navigate(`/frame/${frame.id}?projectId=${projectId}`)}>
                       View
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setEditing(frame)}>Edit</DropdownMenuItem>
-                    <DropdownMenuItem variant="destructive" onClick={() => setDeleting(frame)}>
-                      Delete
-                    </DropdownMenuItem>
+                    {canManage && (
+                      <>
+                        <DropdownMenuItem onClick={() => setEditing(frame)}>Edit</DropdownMenuItem>
+                        <DropdownMenuItem variant="destructive" onClick={() => setDeleting(frame)}>
+                          Delete
+                        </DropdownMenuItem>
+                      </>
+                    )}
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
@@ -112,41 +118,45 @@ export function FramesTable({
         ))}
       </div>
 
-      <FrameEditDialog
-        frame={editing}
-        onOpenChange={(o) => !o && setEditing(null)}
-        onSaved={onRefetch}
-      />
+      {canManage && (
+        <>
+          <FrameEditDialog
+            frame={editing}
+            onOpenChange={(o) => !o && setEditing(null)}
+            onSaved={onRefetch}
+          />
 
-      <AlertDialog open={!!deleting} onOpenChange={(o) => !o && setDeleting(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete “{deleting?.name}”?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This frame version and its layers will be permanently deleted.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={async (e) => {
-                e.preventDefault()
-                if (!deleting) return
-                const ok = await deleteFrame(deleting.id)
-                if (ok) {
-                  toast.success("Frame deleted")
-                  setDeleting(null)
-                  onRefetch()
-                } else {
-                  toast.error("Failed to delete frame")
-                }
-              }}
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+          <AlertDialog open={!!deleting} onOpenChange={(o) => !o && setDeleting(null)}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete “{deleting?.name}”?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This frame version and its layers will be permanently deleted.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={async (e) => {
+                    e.preventDefault()
+                    if (!deleting) return
+                    const ok = await deleteFrame(deleting.id)
+                    if (ok) {
+                      toast.success("Frame deleted")
+                      setDeleting(null)
+                      onRefetch()
+                    } else {
+                      toast.error("Failed to delete frame")
+                    }
+                  }}
+                >
+                  Delete
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </>
+      )}
     </>
   )
 }

@@ -1,0 +1,21 @@
+.git
+.claude
+**/.DS_Store
+**/node_modules
+**/dist
+**/.env
+**/.env.*
+!**/.env.example
+
+# Local PocketBase runtime data / binary (downloaded fresh in the image)
+backend/pb_data
+backend/pb_public
+backend/pocketbase
+
+# Figma plugin is not part of the self-hosted server image
+plugin
+
+frontend/plan.md
+frontend/README.md
+*.md
+!backend/SCHEMA.md

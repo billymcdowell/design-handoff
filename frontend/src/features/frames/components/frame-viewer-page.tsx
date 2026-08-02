@@ -34,6 +34,7 @@ import { copyToClipboard } from "@/lib/clipboard"
 import { toast } from "@/lib/toast"
 import { useIsMobile } from "@/hooks/use-mobile"
 import type { Frame, Layer } from "@/lib/types"
+import { useAuth } from "@/providers/auth-provider"
 
 interface FrameViewerPageProps {
   frame: Frame & { layers: Layer[] }
@@ -193,6 +194,7 @@ export default function FrameViewerPage({
 }: FrameViewerPageProps) {
   const navigate = useNavigate()
   const isMobile = useIsMobile()
+  const { canManage } = useAuth()
 
   const [selectedLayer, setSelectedLayer] = useState<Layer | null>(null)
   const [hoveredLayer, setHoveredLayer] = useState<Layer | null>(null)
@@ -472,14 +474,16 @@ export default function FrameViewerPage({
                         >
                           View
                         </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          aria-label="Delete version"
-                          onClick={() => setDeleteVersionId(version.id)}
-                        >
-                          <Trash2 className="size-4" />
-                        </Button>
+                        {canManage && (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            aria-label="Delete version"
+                            onClick={() => setDeleteVersionId(version.id)}
+                          >
+                            <Trash2 className="size-4" />
+                          </Button>
+                        )}
                       </div>
                     </div>
                   )

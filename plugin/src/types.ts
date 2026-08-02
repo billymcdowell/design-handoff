@@ -144,14 +144,47 @@ export interface UploadProgress {
 
 // --- Foundational export ---
 
+export interface FoundationalStyles {
+  paint: PaintStyleExport[]
+  text: TextStyleExport[]
+  effect: EffectStyleExport[]
+  grid: GridStyleExport[]
+}
+
 export interface FoundationalExport {
   variables: Record<string, VariableCollectionExport>
-  styles: {
-    paint: PaintStyleExport[]
-    text: TextStyleExport[]
-    effect: EffectStyleExport[]
-    grid: GridStyleExport[]
-  }
+  styles: FoundationalStyles
+}
+
+/** Per-Figma-file slice stored inside foundations.data.sources */
+export interface FoundationSource {
+  fileKey: string
+  fileName: string
+  updatedAt: string
+  variables: Record<string, VariableCollectionExport>
+  styles: FoundationalStyles
+}
+
+export interface FoundationHistorySummary {
+  added: string[]
+  removed: string[]
+  changed: string[]
+}
+
+export interface FoundationHistoryEntry {
+  id: string
+  at: string
+  fileKey: string
+  fileName: string
+  summary: FoundationHistorySummary
+}
+
+/** Shape persisted in foundations.data (merged multi-file + history). */
+export interface FoundationsStoredData {
+  sources: Record<string, FoundationSource>
+  variables: Record<string, VariableCollectionExport>
+  styles: FoundationalStyles
+  history: FoundationHistoryEntry[]
 }
 
 export interface VariableCollectionExport {
