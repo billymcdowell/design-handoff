@@ -1152,46 +1152,59 @@ if stroke.type === 'SOLID':
 return null
 ```
 
-### 11.8 getLayoutProps(node) — Auto Layout → CSS
+### 11.8 Auto Layout → flex / grid CSS
 
-Only for FRAME/COMPONENT/INSTANCE with `layoutMode !== "NONE"`:
+Helpers: `isInAutoLayoutFlow`, `getSizingProps`, `getLayoutProps`, `getChildFlexProps`, `buildLayoutCss`.
 
-```
-if node.layoutMode === "NONE": return { display: "block" }
+**Positioning rules**
 
-css = {
-  display: "flex",
-  gap: toPx(node.itemSpacing),
-  flexDirection: node.layoutMode === "HORIZONTAL" ? "row" : "column",
-  flexWrap: node.layoutWrap === "WRAP" ? "wrap" : "nowrap"
-}
+- Freeform (parent has no Auto Layout): `position: absolute` + frame-relative `left`/`top` + fixed px sizes
+- In-flow Auto Layout child: no absolute positioning; sizing from Fixed/Hug/Fill
+- Absolute Auto Layout child (`layoutPositioning === "ABSOLUTE"`): `position: absolute` + parent-relative `node.x`/`node.y` + fixed px sizes
+- Flex/grid containers also set `position: relative` when in-flow (so absolute children nest correctly)
 
-// primaryAxisAlignItems → justifyContent
-MIN → flex-start, MAX → flex-end, CENTER → center, SPACE_BETWEEN → space-between
-
-// counterAxisAlignItems → alignItems
-MIN → flex-start, MAX → flex-end, CENTER → center, BASELINE → baseline, default → stretch
-
-// if layoutWrap === "WRAP": counterAxisAlignContent → alignContent
-MIN → flex-start, MAX → flex-end, CENTER → center, SPACE_BETWEEN → space-between
-
-// padding
-if all padding equal and > 0: css.padding = toPx(paddingLeft)
-else: css.padding = "{top} {right} {bottom} {left}" using toPx
-
-return css
-```
-
-**Child flex props** (when parent is Auto Layout):
+**getLayoutProps(node)** — container only, when `layoutMode` is HORIZONTAL / VERTICAL / GRID:
 
 ```
-if node.layoutGrow === 1: extraCss.flexGrow = 1
-switch node.layoutAlign:
-  MIN → alignSelf: flex-start
-  MAX → alignSelf: flex-end
-  CENTER → alignSelf: center
-  STRETCH → alignSelf: stretch
+HORIZONTAL / VERTICAL:
+  display: flex, position: relative
+  gap: itemSpacing, flexDirection: row|column, flexWrap
+  primaryAxisAlignItems → justifyContent
+  counterAxisAlignItems → alignItems
+  counterAxisAlignContent SPACE_BETWEEN → alignContent (when WRAP)
+  padding shorthand
+
+GRID:
+  display: grid, position: relative
+  gridTemplateColumns from gridColumnSizes (FIXED→px, FLEX→fr, HUG→fit-content)
+    or repeat(gridColumnCount, 1fr)
+  gridTemplateRows from gridRowSizes or repeat(gridRowCount, auto)
+  columnGap / rowGap from gridColumnGap / gridRowGap
+  gridAutoFlow: row when gridItemsPositioning === ROW_AUTO_FLOW
+  justifyContent / alignItems when present
+  padding shorthand
 ```
+
+**getSizingProps(node, width, height, parentMode)** — Fixed / Hug / Fill:
+
+| Figma | Primary axis (flex) | Counter axis | Grid |
+| --- | --- | --- | --- |
+| FIXED | width/height: Npx | same | same |
+| HUG | fit-content | fit-content | fit-content |
+| FILL | flex-grow:1; flex-basis:0 (omit size) | align-self: stretch | width/height 100% + stretch |
+
+Freeform (parentMode null): always px, except Auto Layout containers may Hug on their own axes.
+
+**getChildFlexProps(node)** — when parent is Auto Layout:
+
+```
+if layoutPositioning === ABSOLUTE: position absolute + fixed w/h
+if parent GRID: gridColumn / gridRow from anchor index + span
+layoutAlign MIN/MAX/CENTER/STRETCH → alignSelf
+layoutGrow === 1 → flexGrow/flexShrink/flexBasis (legacy Fill)
+```
+
+**buildLayoutCss(node, width, height)** merges container + child + sizing + position into one `CSSPropsRecord`.
 
 ### 11.9 extractTypography(node) — async
 
@@ -1266,89 +1279,52 @@ layout = {
 if type in [FRAME, COMPONENT, INSTANCE] AND any padding > 0:
   layout.padding = { top, right, bottom, left } (all rounded)
 
-// Styles
-fills = node.fills if exists
-backgroundColor = getFillColor(fills) || (TEXT ? "transparent" : "#F3F4F6")
-borderRadius = cornerRadius is number ? "{round(cornerRadius)}px" : undefined
-border = getBorderInfo(node)
-boxShadow = getBoxShadow(node.effects) if exists
-opacity = getOpacity(node)
-
-styles = {
-  backgroundColor,
-  borderRadius,
-  borderWidth: border?.width || "0px",
-  borderColor: border?.color || "transparent",
-  boxShadow,
-  opacity
-}
-
+// Styles (unchanged) …
 typography = node.type === "TEXT" ? await extractTypography(node) : null
 
-// Auto layout CSS extras
-extraCss = {}
-if type in [FRAME, COMPONENT, INSTANCE]:
-  extraCss = { ...extraCss, ...getLayoutProps(node) }
+extraCss = buildLayoutCss(node, width, height)
 
-if parent is Auto Layout container:
-  apply child flexGrow/alignSelf to extraCss
-
-className = node.name.toLowerCase().replace(/\s+/g, "-")
+// Absolute children inside Auto Layout use parent-relative node.x/node.y for code
+codeX/codeY = (absolute AL child) ? round(node.x/y) : x/y
 
 code = {
-  css: generateCSS(className, x, y, width, height, styles, layout, typography, extraCss),
-  tailwind: generateTailwind(x, y, width, height, styles, layout, typography),
-  react: generateReact(x, y, width, height, styles, layout, typography, extraCss)
+  css: generateCSS(className, codeX, codeY, width, height, styles, layout, typography, extraCss),
+  tailwind: generateTailwind(codeX, codeY, width, height, styles, layout, typography, extraCss),
+  react: generateReact(codeX, codeY, width, height, styles, layout, typography, extraCss)
 }
 
-return { id: node.id, name, type: node.type, x, y, width, height, layout, styles, typography, code }
+return { id, name, type, x, y, width, height, layout, styles, typography, code }
 ```
 
 ### 11.12 generateCSS
 
 Build string `.className { ... }`:
 
-- If `!extraCss.display || extraCss.display === 'absolute'`: `position: absolute; left: {x}px; top: {y}px;`
-- Else: `position: relative;`
-- Always: `width: {width}px; height: {height}px;`
-- If backgroundColor !== "transparent": `background-color: {color};`
-- If borderRadius: include
-- If borderWidth !== "0px": include width + color
-- If boxShadow: include
-- If layout.padding: `padding: {top}px {right}px {bottom}px {left}px;`
-- If typography: font-family, font-size, font-weight, line-height, letter-spacing, color, text-align
-- If extraCss flex props: display, flexDirection, flexWrap, justifyContent, alignItems, alignContent, alignSelf, flexGrow, gap
+- If `extraCss.position === 'absolute'`: `position: absolute; left/top`
+- Else if `relative`: `position: relative;`
+- Width/height from `extraCss.width`/`extraCss.height` when set; else fixed px only when absolute
+- Styles, padding, typography as before
+- Layout declarations: display, flex-*, align-*, gap, grid-template-*, grid-column/row, etc.
 
 ### 11.13 generateTailwind
 
-Always starts with: `absolute left-[{x}px] top-[{y}px] w-[{width}px] h-[{height}px]`
+Uses the same `extraCss` as CSS/React (parity):
 
-Background shortcuts:
+- Absolute → `absolute left-[…] top-[…]` + fixed `w-/h-` when needed
+- Flex container → `flex flex-col flex-wrap justify-* items-* gap-*`
+- Grid container → `grid grid-cols-[…] grid-rows-[…] gap-x/y-*`
+- In-flow Fill → `flex-1` / `self-stretch`; Hug → `w-fit`/`h-fit`; Fixed → `w-[Npx]`
+- No absolute/left/top for in-flow Auto Layout children
 
-- `#FFFFFF`, `#fff`, `white` → `bg-white`
-- `#3B82F6`, `#007AFF` → `bg-blue-500`
-- `#10B981` → `bg-emerald-500`
-- else → `bg-[{color}]`
-
-Border radius shortcuts:
-
-- `8px` → `rounded-lg`, `12px` → `rounded-xl`, `16px` → `rounded-2xl`, else `rounded-[{radius}]`
-
-Box shadow → `shadow-md`
-
-Padding: if all equal → `p-{round(top/4)}`, else `px-{round(left/4)} py-{round(top/4)}`
-
-Typography: `font-sans text-[{size}] font-bold/semibold leading-[...] tracking-[...] text-[{color}]`
+Background / radius / shadow / padding / typography shortcuts unchanged.
 
 ### 11.14 generateReact
 
-Same properties as CSS but as JS object string:
+Same properties as CSS as a JS object string:
 
-- `position: 'absolute'`, `left: {x}`, `top: {y}` (numbers not px strings for x/y/width/height)
-- `backgroundColor: '{color}'` (quoted string)
-- `borderRadius: {parseFloat(borderRadius)}` (number)
-- `padding: '{top}px {right}px {bottom}px {left}px'`
-- Flex props as quoted strings
+- Absolute: `position: 'absolute'`, numeric `left`/`top`
+- Width/height: numeric when px, quoted string for `fit-content` / `100%`
+- Flex/grid props as quoted strings; `flexGrow`/`flexShrink` as numbers
 
 ---
 
@@ -1824,7 +1800,7 @@ These exist in conceptual legacy form but are **not part of live behavior**:
 - [ ] createBackendPayload: fonts → frames (concurrency 3) → parallel image upload
 - [ ] Recursive layer tree from direct children; visibility culling
 - [ ] getNodeBounds handles rotation via absoluteTransform
-- [ ] Auto Layout mapped to flex CSS in code output
+- [x] Auto Layout mapped to flex/grid CSS in code output (Fixed/Hug/Fill, no absolute for in-flow children)
 - [ ] PNG export with 4.5MB limit and dimension fallback ladder
 - [ ] Manual multipart image upload (no FormData)
 - [ ] Bulk upload: project → frames → layers by level → layer_details
@@ -1854,7 +1830,7 @@ These exist in conceptual legacy form but are **not part of live behavior**:
 | 10  | Project with 45 frames, select 6   | Blocked (45+6 > 50)                                 |
 | 11  | Nested frame inside selected frame | Appears as layer in tree, not separate frame record |
 | 12  | Rotated element                    | Frame-relative bounds correct                       |
-| 13  | Auto Layout frame                  | flex properties in generated CSS                    |
+| 13  | Auto Layout frame                  | flex/grid props; Fixed/Hug/Fill sizing; no absolute for in-flow children |
 | 14  | Very large frame                   | PNG resolution reduced automatically                |
 | 15  | Publish Variables & Styles         | Notify success, isExporting resets                  |
 | 16  | Expired token on FETCH_PROJECTS    | Token cleared, returned to login                    |

@@ -156,19 +156,118 @@ export interface FoundationalExport {
   styles: FoundationalStyles
 }
 
+/** Design-token category used in the foundations catalog. */
+export type FoundationCategory =
+  | "color"
+  | "typography"
+  | "number"
+  | "shadow"
+  | "blur"
+  | "grid"
+  | "other"
+
+export type FoundationNumberKind = "spacing" | "radius" | "other"
+
+export type FoundationOrigin =
+  | "variable"
+  | "paint"
+  | "text"
+  | "effect"
+  | "grid"
+
+/** Normalized value stored on a foundation token (semantic, not raw Figma). */
+export type FoundationSemanticValue =
+  | { kind: "color"; hex: string; css: string }
+  | { kind: "number"; value: number }
+  | { kind: "boolean"; value: boolean }
+  | { kind: "string"; value: string }
+  | { kind: "alias"; aliasId: string; aliasName: string }
+  | {
+      kind: "shadow"
+      x: number
+      y: number
+      blur: number
+      spread: number
+      color: string
+      opacity: number
+      inset: boolean
+    }
+  | { kind: "blur"; radius: number; type: "LAYER_BLUR" | "BACKGROUND_BLUR" }
+  | {
+      kind: "shadows"
+      shadows: Array<{
+        x: number
+        y: number
+        blur: number
+        spread: number
+        color: string
+        opacity: number
+        inset: boolean
+      }>
+    }
+  | {
+      kind: "blurs"
+      blurs: Array<{ radius: number; type: "LAYER_BLUR" | "BACKGROUND_BLUR" }>
+    }
+  | {
+      kind: "text"
+      family: string
+      style: string
+      size: number
+      weight: number
+      lineHeight: string
+      letterSpacing: string
+    }
+  | { kind: "paint"; css: string; hex?: string; paints: unknown[] }
+  | { kind: "grid"; grids: unknown[] }
+  | { kind: "unknown"; raw: unknown }
+
+export interface FoundationToken {
+  id: string
+  name: string
+  sourceFileKey: string
+  sourceFileName: string
+  category: FoundationCategory
+  numberKind?: FoundationNumberKind
+  origin: FoundationOrigin
+  collectionName?: string
+  description?: string
+  modes?: { modeId: string; name: string }[]
+  valuesByMode?: Record<string, FoundationSemanticValue>
+  value?: FoundationSemanticValue
+  css?: string
+}
+
 /** Per-Figma-file slice stored inside foundations.data.sources */
 export interface FoundationSource {
   fileKey: string
   fileName: string
   updatedAt: string
-  variables: Record<string, VariableCollectionExport>
-  styles: FoundationalStyles
+  tokens: Record<string, FoundationToken>
+}
+
+export interface FoundationHistoryItemRef {
+  id: string
+  name: string
+  category: FoundationCategory
+}
+
+export interface FoundationHistoryFieldChange {
+  path: string
+  before: unknown
+  after: unknown
+}
+
+export interface FoundationHistoryChangedItem extends FoundationHistoryItemRef {
+  changes: FoundationHistoryFieldChange[]
 }
 
 export interface FoundationHistorySummary {
-  added: string[]
-  removed: string[]
-  changed: string[]
+  kind: "initial" | "diff" | "source_removed"
+  added: FoundationHistoryItemRef[]
+  removed: FoundationHistoryItemRef[]
+  changed: FoundationHistoryChangedItem[]
+  counts?: { tokens: number }
 }
 
 export interface FoundationHistoryEntry {
@@ -179,11 +278,11 @@ export interface FoundationHistoryEntry {
   summary: FoundationHistorySummary
 }
 
-/** Shape persisted in foundations.data (merged multi-file + history). */
+/** Shape persisted in foundations.data (v2 catalog + history). */
 export interface FoundationsStoredData {
+  version: 2
   sources: Record<string, FoundationSource>
-  variables: Record<string, VariableCollectionExport>
-  styles: FoundationalStyles
+  catalog: Record<string, FoundationToken>
   history: FoundationHistoryEntry[]
 }
 
@@ -218,7 +317,7 @@ export interface PaintStyleExport extends BaseStyleExport {
 export interface TextStyleExport extends BaseStyleExport {
   fontName: { family: string; style: string }
   fontSize: number
-  fontWeight: number // hardcoded 400 placeholder
+  fontWeight: number
   lineHeight: unknown
   letterSpacing: unknown
   textDecoration: string

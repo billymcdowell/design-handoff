@@ -110,14 +110,14 @@ Token/style refs (optional, resolved at publish time):
 | Field | Type | Notes |
 | --- | --- | --- |
 | `owner` | relation → `users` | required, **unique**, cascade delete |
-| `data` | json | multi-file merged variables + styles + history (see below) |
-| `variables_count` | number (int) | count across the flattened merge |
-| `styles_count` | number (int) | count across the flattened merge |
+| `data` | json | v2 multi-file token catalog + history (see below) |
+| `variables_count` | number (int) | catalog tokens with `origin === "variable"` |
+| `styles_count` | number (int) | catalog tokens with style origins (paint/text/effect/grid) |
 
-Publishing variables & styles from the plugin **merges by Figma file key** into
-this single record for the authenticated user. Re-publishing from the same file
-replaces that file’s slice only; other files’ tokens are kept. Every project
-reads the same foundations.
+Publishing variables & styles from the plugin **mirrors by Figma file key** into
+this single record for the authenticated user. Re-syncing from the same file
+replaces that file’s token slice only; other files’ tokens are kept. Every
+project reads the same foundations.
 
 ---
 
@@ -163,43 +163,51 @@ in the Admin UI to preserve Figma node ids directly.)
 
 ## `foundations.data` shape
 
-Multi-file merge. Each Figma file that publishes variables & styles is stored
-under `sources[<fileKey>]`. Flat `variables` / `styles` are a rebuilt merge for
-the Foundations viewer (collection keys become `` `${fileName} / ${name}` ``
-when more than one source is present; colliding style names get the same
-prefix). `history` is a capped changelog (last 50 uploads).
-
-Legacy rows with only flat `variables`/`styles` are wrapped into
-`sources.legacy` on the next plugin upload.
+Multi-file **mirror**. Each Figma file that syncs local variables & styles is
+stored under `sources[<fileKey>]` as an id-keyed token map. `catalog` is the
+flattened union for the Foundations viewer (colliding names across files get a
+`` `${fileName} / ${name}` `` prefix). `history` is a capped changelog (last 50
+entries). Non-v2 payloads are discarded on the next sync (no backwards compat).
 
 ```jsonc
 {
+  "version": 2,
   "sources": {
     "<fileKey>": {
       "fileKey": "abc",
       "fileName": "Design System",
       "updatedAt": "2026-08-02T12:00:00.000Z",
-      "variables": {
-        "Colors": {
-          "id": "…", "name": "Colors",
-          "modes": [{ "modeId": "m1", "name": "Default" }],
-          "variables": [
-            { "id": "v1", "name": "primary/500", "type": "COLOR",
-              "valuesByMode": { "m1": { "r": 37, "g": 99, "b": 235, "a": 1 } },
-              "description": "", "scopes": [], "codeSyntax": {} }
-          ]
+      "tokens": {
+        "VariableID:1": {
+          "id": "VariableID:1",
+          "name": "primary/500",
+          "sourceFileKey": "abc",
+          "sourceFileName": "Design System",
+          "category": "color",
+          "origin": "variable",
+          "collectionName": "Colors",
+          "modes": [{ "modeId": "m1", "name": "Light" }],
+          "valuesByMode": {
+            "m1": { "kind": "color", "hex": "#2563EB", "css": "rgba(37, 99, 235, 1)" }
+          },
+          "css": "rgba(37, 99, 235, 1)"
+        },
+        "S:effect1:shadow": {
+          "id": "S:effect1:shadow",
+          "name": "Elevation / 2",
+          "category": "shadow",
+          "origin": "effect",
+          "value": {
+            "kind": "shadow",
+            "x": 0, "y": 4, "blur": 8, "spread": 0,
+            "color": "rgba(0,0,0,0.2)", "opacity": 0.2, "inset": false
+          },
+          "css": "box-shadow: 0px 4px 8px 0px rgba(0,0,0,0.2)"
         }
-      },
-      "styles": {
-        "paint":  [{ "id": "s1", "name": "Primary Fill", "type": "PAINT", "paints": [ … ] }],
-        "text":   [],
-        "effect": [],
-        "grid":   []
       }
     }
   },
-  "variables": { /* flatten of all sources */ },
-  "styles": { /* flatten of all sources */ },
+  "catalog": { /* flatten of all sources.tokens */ },
   "history": [
     {
       "id": "h_…",
@@ -207,17 +215,27 @@ Legacy rows with only flat `variables`/`styles` are wrapped into
       "fileKey": "abc",
       "fileName": "Design System",
       "summary": {
-        "added": ["Colors/primary/500"],
+        "kind": "diff", // or "initial" | "source_removed"
+        "added": [{ "id": "…", "name": "primary/500", "category": "color" }],
         "removed": [],
-        "changed": ["Colors/secondary"]
+        "changed": [{
+          "id": "…", "name": "primary/600", "category": "color",
+          "changes": [{ "path": "valuesByMode.Light", "before": {…}, "after": {…} }]
+        }],
+        "counts": { "tokens": 42 } // present on initial / source_removed
       }
     }
   ]
 }
 ```
 
-Value types: `COLOR` → Figma rgba (0–1) or `{css}`/`{hex}`; `FLOAT` → number;
-alias → `{ type: "VARIABLE_ALIAS", id, name }`.
+Categories (type-first): `color`, `typography`, `number` (+ `numberKind`:
+spacing|radius|other), `shadow`, `blur`, `grid`, `other`. Effect styles that
+contain both shadows and blurs are split into synthetic ids
+`` `${styleId}:shadow` `` / `` `${styleId}:blur` ``.
+
+`variables_count` / `styles_count` on the record count catalog tokens by
+`origin === "variable"` vs everything else.
 
 ---
 
@@ -238,13 +256,23 @@ All authenticated users can **list/view** every record. Mutations require
 
 ## Applying the schema
 
-**Option A — migrations (local `pb_data`):**
+**Option A — migrations (local `pb_data` or Docker):**
 
 ```bash
 # from backend/, with the pocketbase binary present:
 ./pocketbase migrate up
 ./pocketbase serve         # admin at /_/ , API at /api/
 ```
+
+Docker applies the same `pb_migrations/` on boot (`docker-entrypoint.sh`). After
+pulling schema/migration changes, rebuild so the image gets the new files:
+
+```bash
+docker compose up -d --build
+```
+
+`1785666300_foundations_v2_catalog.js` updates foundations field help and clears
+non-v2 `data` blobs (re-sync from Figma afterward).
 
 **Option B — Admin UI import (fresh PocketBase):**
 

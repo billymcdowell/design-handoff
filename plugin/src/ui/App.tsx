@@ -150,7 +150,7 @@ export function App() {
           const changeLabel =
             (msg.changeLabel as string | undefined) || "no changes"
           setFoundationsNote(
-            `Merged from “${fileName}” (${changeLabel}). Other Figma files’ tokens are kept.`,
+            `Synced “${fileName}” (${changeLabel}). Other Figma files’ slices are kept.`,
           )
         } else {
           setFoundationsNote(null)
@@ -410,14 +410,12 @@ function DashboardView(props: {
         {isPublishing ? "Processing..." : "Publish to Dev Handoff"}
       </button>
       <button disabled={foundationalDisabled} onClick={onExportFoundational}>
-        {isExporting
-          ? "Uploading Foundations..."
-          : "Publish Variables & Styles (merge)"}
+        {isExporting ? "Syncing foundations..." : "Sync foundations"}
       </button>
       <p className="small muted">
-        Merges this Figma file’s local variables &amp; styles into your shared
-        foundations. Re-publish from other files to add their tokens without
-        wiping this one.
+        Mirrors this Figma file’s local variables &amp; styles into your shared
+        foundations. Sync other files separately — each file keeps its own
+        slice.
       </p>
       {foundationsNote && <p className="small">{foundationsNote}</p>}
 

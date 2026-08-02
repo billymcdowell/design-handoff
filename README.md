@@ -41,7 +41,13 @@ Then:
 2. Sign in to the app with that user.
 3. Point the Figma plugin at your server (see below).
 
-On first start the container runs `pocketbase migrate up`, which creates all collections (`projects`, `frames`, `layers`, `layer_details`, `foundations`, plus the `users.role` field).
+On first start the container runs `pocketbase migrate up`, which creates all collections (`projects`, `frames`, `layers`, `layer_details`, `foundations`, plus the `users.role` field). Rebuild after schema/migration changes so Docker picks them up:
+
+```bash
+docker compose up -d --build
+```
+
+Existing volumes keep their data; new migrations (including foundations v2 field help + clearing pre-v2 foundations JSON) apply on boot. Re-sync foundations from the Figma plugin after upgrading.
 
 ### Persisting data (DB + images)
 

@@ -114,18 +114,115 @@ export interface Foundation extends RecordModel {
   styles_count: number
 }
 
+export type FoundationCategory =
+  | "color"
+  | "typography"
+  | "number"
+  | "shadow"
+  | "blur"
+  | "grid"
+  | "other"
+
+export type FoundationNumberKind = "spacing" | "radius" | "other"
+
+export type FoundationOrigin =
+  | "variable"
+  | "paint"
+  | "text"
+  | "effect"
+  | "grid"
+
+export type FoundationSemanticValue =
+  | { kind: "color"; hex: string; css: string }
+  | { kind: "number"; value: number }
+  | { kind: "boolean"; value: boolean }
+  | { kind: "string"; value: string }
+  | { kind: "alias"; aliasId: string; aliasName: string }
+  | {
+      kind: "shadow"
+      x: number
+      y: number
+      blur: number
+      spread: number
+      color: string
+      opacity: number
+      inset: boolean
+    }
+  | { kind: "blur"; radius: number; type: "LAYER_BLUR" | "BACKGROUND_BLUR" }
+  | {
+      kind: "shadows"
+      shadows: Array<{
+        x: number
+        y: number
+        blur: number
+        spread: number
+        color: string
+        opacity: number
+        inset: boolean
+      }>
+    }
+  | {
+      kind: "blurs"
+      blurs: Array<{ radius: number; type: "LAYER_BLUR" | "BACKGROUND_BLUR" }>
+    }
+  | {
+      kind: "text"
+      family: string
+      style: string
+      size: number
+      weight: number
+      lineHeight: string
+      letterSpacing: string
+    }
+  | { kind: "paint"; css: string; hex?: string; paints: unknown[] }
+  | { kind: "grid"; grids: unknown[] }
+  | { kind: "unknown"; raw: unknown }
+
+export type FoundationToken = {
+  id: string
+  name: string
+  sourceFileKey: string
+  sourceFileName: string
+  category: FoundationCategory
+  numberKind?: FoundationNumberKind
+  origin: FoundationOrigin
+  collectionName?: string
+  description?: string
+  modes?: { modeId: string; name: string }[]
+  valuesByMode?: Record<string, FoundationSemanticValue>
+  value?: FoundationSemanticValue
+  css?: string
+}
+
 export type FoundationSource = {
   fileKey: string
   fileName: string
   updatedAt: string
-  variables?: FoundationsData["variables"]
-  styles?: FoundationsData["styles"]
+  tokens: Record<string, FoundationToken>
+}
+
+export type FoundationHistoryItemRef = {
+  id: string
+  name: string
+  category: FoundationCategory
+}
+
+export type FoundationHistoryFieldChange = {
+  path: string
+  before: unknown
+  after: unknown
+}
+
+export type FoundationHistoryChangedItem = FoundationHistoryItemRef & {
+  changes: FoundationHistoryFieldChange[]
 }
 
 export type FoundationHistorySummary = {
-  added: string[]
-  removed: string[]
-  changed: string[]
+  kind: "initial" | "diff" | "source_removed"
+  added: FoundationHistoryItemRef[]
+  removed: FoundationHistoryItemRef[]
+  changed: FoundationHistoryChangedItem[]
+  counts?: { tokens: number }
 }
 
 export type FoundationHistoryEntry = {
@@ -137,44 +234,8 @@ export type FoundationHistoryEntry = {
 }
 
 export type FoundationsData = {
-  /** Per-Figma-file slices; flat variables/styles are a merged view. */
+  version?: number
   sources?: Record<string, FoundationSource>
+  catalog?: Record<string, FoundationToken>
   history?: FoundationHistoryEntry[]
-  variables?: Record<
-    string,
-    {
-      id: string
-      name: string
-      modes: Array<{ modeId: string; name: string }>
-      variables: Array<{
-        id: string
-        name: string
-        type: string
-        description?: string
-        scopes?: string[]
-        codeSyntax?: Record<string, string>
-        valuesByMode?: Record<string, unknown>
-      }>
-    }
-  >
-  styles?: {
-    paint?: Array<{ id: string; name: string; description?: string; type: string; paints?: unknown[] }>
-    text?: Array<{
-      id: string
-      name: string
-      description?: string
-      type: string
-      fontName?: { family?: string; style?: string }
-      fontSize?: number
-      fontWeight?: number
-      lineHeight?: { value?: number; unit?: string } | number
-      letterSpacing?: { value?: number; unit?: string } | number
-      textDecoration?: string
-      paragraphIndent?: number
-      paragraphSpacing?: number
-      textCase?: string
-    }>
-    effect?: Array<{ id: string; name: string; description?: string; type: string; effects?: unknown[] }>
-    grid?: Array<{ id: string; name: string; description?: string; type: string; layoutGrids?: unknown[] }>
-  }
 }

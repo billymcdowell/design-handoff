@@ -1,7 +1,8 @@
 import { pb } from "../pocketbase"
 import { resolveOwnerUserId } from "../auth"
 import { framesByNameFilter, projectFilter, escapeFilterValue } from "../pb-filter"
-import type { Foundation, Frame, Layer, LayerDetail, Project } from "../types"
+import { removeFoundationSourceFromData } from "@/features/foundations/catalog"
+import type { Foundation, FoundationsData, Frame, Layer, LayerDetail, Project } from "../types"
 
 // ─── Projects ───────────────────────────────────────────────
 /** All projects visible to the signed-in user (admins + developers). */
@@ -169,4 +170,28 @@ export async function getUserFoundations(): Promise<Foundation | null> {
       return null
     }
   }
+}
+
+export async function updateFoundationRecord(
+  id: string,
+  body: {
+    data: FoundationsData
+    variables_count: number
+    styles_count: number
+  },
+): Promise<Foundation> {
+  return await pb.collection("foundations").update<Foundation>(id, body)
+}
+
+export async function removeFoundationSource(
+  foundation: Foundation,
+  fileKey: string,
+): Promise<Foundation> {
+  const result = removeFoundationSourceFromData(foundation.data, fileKey)
+  if (!result.historyEntry) return foundation
+  return await updateFoundationRecord(foundation.id, {
+    data: result.data,
+    variables_count: result.counts.variables_count,
+    styles_count: result.counts.styles_count,
+  })
 }

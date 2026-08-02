@@ -29,15 +29,16 @@ Generate one from PocketBase Admin:
 A regular `users` auth token also works if that user has **role `super`**
 (developers are read-only in the dashboard and cannot publish).
 
-**Variables & Styles:** `foundations.owner` must be a `users` record id. When you
+**Foundations:** `foundations.owner` must be a `users` record id. When you
 paste a superuser impersonate token, the plugin maps ownership to a dashboard
 user (matching email if one exists, otherwise the owner of an existing project).
 Without a matching user or project, the upload will ask you to create one first.
 
-Uploads **merge by Figma file**: publish once from each file that owns local
-variables/styles. Re-publishing the same file replaces that file’s slice and
-appends a capped change history (added / removed / changed). Publishing from a
-second file adds its tokens without wiping the first.
+**Sync foundations** mirrors this Figma file’s local variables & styles into a
+per-file slice (other files’ slices are kept). Diffs are semantic (by Figma id);
+the first sync for a file logs an “Initial sync” summary, later syncs only log
+real added/removed/changed tokens, and empty diffs skip history. Non-v2 data is
+replaced on the next sync (no backwards compatibility).
 
 See <https://pocketbase.io/docs/authentication/#api-keys>.
 

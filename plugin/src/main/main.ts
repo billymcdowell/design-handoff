@@ -5,12 +5,11 @@
 import { STORAGE_KEY_THEME, STORAGE_KEY_TOKEN } from "../constants"
 import type { BackendPayload, FoundationalExport } from "../types"
 import {
-  countStyles,
-  countVariables,
+  countCatalogTokens,
   formatHistorySummary,
   getFoundationFileIdentity,
   getFoundationalElements,
-  mergeFoundationsData,
+  syncFoundationsData,
 } from "./foundational"
 import { fetchProjectsFromApi, resolveProjectForPublish } from "./planLimits"
 import {
@@ -292,7 +291,7 @@ figma.ui.onmessage = async (msg: Msg) => {
         const existing = await findFoundationRecord(token, ownerId)
         const existingData = existing?.data ?? null
 
-        const { data: merged, historyEntry } = mergeFoundationsData(
+        const { data: synced, historyEntry } = syncFoundationsData(
           existingData,
           {
             fileKey,
@@ -302,22 +301,25 @@ figma.ui.onmessage = async (msg: Msg) => {
           },
         )
 
+        const counts = countCatalogTokens(synced.catalog)
         await upsertFoundationRecord(token, {
           owner: ownerId,
-          data: merged,
-          variables_count: countVariables(merged),
-          styles_count: countStyles(merged),
+          data: synced,
+          variables_count: counts.variables_count,
+          styles_count: counts.styles_count,
         })
 
-        const changeLabel = formatHistorySummary(historyEntry.summary)
+        const changeLabel = historyEntry
+          ? formatHistorySummary(historyEntry.summary)
+          : "no changes"
         figma.notify(
-          `✅ Variables & Styles merged from “${fileName}” (${changeLabel})`,
+          `✅ Foundations synced from “${fileName}” (${changeLabel})`,
         )
         figma.ui.postMessage({
           type: "FOUNDATIONAL_UPLOAD_COMPLETE",
           success: true,
           fileName,
-          summary: historyEntry.summary,
+          summary: historyEntry?.summary ?? null,
           changeLabel,
         })
       } catch (err) {

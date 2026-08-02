@@ -912,7 +912,7 @@
         "type": "text"
       },
       {
-        "help": "Multi-file merged tokens: sources[<fileKey>] {fileKey,fileName,updatedAt,variables,styles}, flat variables/styles for the viewer, history[] {id,at,fileKey,fileName,summary:{added,removed,changed}} (last 50 uploads). Re-publish per Figma file merges by fileKey.",
+        "help": "v2 mirror: sources[fileKey].tokens + catalog + history (initial|diff|source_removed). Categories: color, typography, number, shadow, blur, grid, other. Sync replaces one file slice.",
         "hidden": false,
         "id": "json_project_foundations_data",
         "maxSize": 20000000,
@@ -923,7 +923,7 @@
         "type": "json"
       },
       {
-        "help": "Total variable count across the flattened merge of all sources.",
+        "help": "Catalog tokens with origin=variable (all synced files).",
         "hidden": false,
         "id": "num_project_foundations_variables_count",
         "max": null,
@@ -936,7 +936,7 @@
         "type": "number"
       },
       {
-        "help": "Total style count across the flattened merge of all sources.",
+        "help": "Catalog tokens with origin paint|text|effect|grid (all synced files).",
         "hidden": false,
         "id": "num_project_foundations_styles_count",
         "max": null,

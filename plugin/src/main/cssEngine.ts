@@ -270,64 +270,290 @@ export function getBorderInfo(
   return null
 }
 
-// 11.8 ── Auto Layout → flex CSS ────────────────────────────────────────────
+// 11.8 ── Auto Layout → flex / grid CSS ─────────────────────────────────────
 type AutoLayoutNode = FrameNode | ComponentNode | InstanceNode
+type LayoutMode = "NONE" | "HORIZONTAL" | "VERTICAL" | "GRID"
+type SizingMode = "FIXED" | "HUG" | "FILL"
 
+type CSSPropsRecord = {
+  /** Explicit positioning. Absolute only for freeform or absolute Auto Layout children. */
+  position?: "absolute" | "relative"
+  display?: string
+  flexDirection?: string
+  flexWrap?: string
+  justifyContent?: string
+  alignItems?: string
+  alignContent?: string
+  alignSelf?: string
+  justifySelf?: string
+  flexGrow?: string
+  flexShrink?: string
+  flexBasis?: string
+  gap?: string
+  rowGap?: string
+  columnGap?: string
+  padding?: string
+  /** Resolved CSS width (e.g. "120px", "fit-content", "100%"). Undefined = omit. */
+  width?: string
+  /** Resolved CSS height. Undefined = omit. */
+  height?: string
+  gridTemplateColumns?: string
+  gridTemplateRows?: string
+  gridAutoFlow?: string
+  gridColumn?: string
+  gridRow?: string
+}
+
+const AUTO_LAYOUT_TYPES = ["FRAME", "COMPONENT", "INSTANCE"]
+
+function isAutoLayoutContainer(node: BaseNode | null | undefined): node is AutoLayoutNode {
+  if (!node || !("layoutMode" in node)) return false
+  const mode = (node as AutoLayoutNode).layoutMode
+  return mode === "HORIZONTAL" || mode === "VERTICAL" || mode === "GRID"
+}
+
+function getParentLayoutMode(node: SceneNode): LayoutMode | null {
+  if (!node.parent || !("layoutMode" in node.parent)) return null
+  return (node.parent as AutoLayoutNode).layoutMode
+}
+
+function isAbsoluteLayoutChild(node: SceneNode): boolean {
+  return (
+    "layoutPositioning" in node &&
+    (node as SceneNode & { layoutPositioning: string }).layoutPositioning ===
+      "ABSOLUTE"
+  )
+}
+
+/** True when this node participates in a parent's Auto Layout flow (not absolute). */
+export function isInAutoLayoutFlow(node: SceneNode): boolean {
+  const parentMode = getParentLayoutMode(node)
+  if (!parentMode || parentMode === "NONE") return false
+  return !isAbsoluteLayoutChild(node)
+}
+
+function mapPrimaryAlign(
+  value: "MIN" | "MAX" | "CENTER" | "SPACE_BETWEEN",
+): string {
+  switch (value) {
+    case "MIN":
+      return "flex-start"
+    case "MAX":
+      return "flex-end"
+    case "CENTER":
+      return "center"
+    case "SPACE_BETWEEN":
+      return "space-between"
+  }
+}
+
+function mapCounterAlign(
+  value: "MIN" | "MAX" | "CENTER" | "BASELINE" | "STRETCH",
+): string {
+  switch (value) {
+    case "MIN":
+      return "flex-start"
+    case "MAX":
+      return "flex-end"
+    case "CENTER":
+      return "center"
+    case "BASELINE":
+      return "baseline"
+    default:
+      return "stretch"
+  }
+}
+
+function mapAlignContent(
+  value: "AUTO" | "SPACE_BETWEEN",
+): string | undefined {
+  if (value === "SPACE_BETWEEN") return "space-between"
+  return undefined
+}
+
+function gridTrackToCss(track: GridTrackSize): string {
+  if (track.type === "FIXED") return toPx(track.value ?? 0)
+  if (track.type === "HUG") return "fit-content"
+  const fr = track.value ?? 1
+  return fr === 1 ? "1fr" : `${fr}fr`
+}
+
+function getNodeSizingMode(
+  node: SceneNode,
+  axis: "horizontal" | "vertical",
+): SizingMode | undefined {
+  if (axis === "horizontal" && "layoutSizingHorizontal" in node) {
+    return node.layoutSizingHorizontal as SizingMode
+  }
+  if (axis === "vertical" && "layoutSizingVertical" in node) {
+    return node.layoutSizingVertical as SizingMode
+  }
+  return undefined
+}
+
+/**
+ * Map Fixed / Hug / Fill on each axis into CSS width/height and flex/grid item props.
+ * When `parentMode` is null the node is freeform — always emit fixed pixel sizes.
+ */
+export function getSizingProps(
+  node: SceneNode,
+  width: number,
+  height: number,
+  parentMode: LayoutMode | null,
+): Partial<CSSPropsRecord> {
+  const css: Partial<CSSPropsRecord> = {}
+
+  // Freeform (no Auto Layout parent): always fixed px sizes.
+  if (!parentMode || parentMode === "NONE") {
+    // Auto Layout containers themselves can still Hug/Fixed when freeform-positioned.
+    if (isAutoLayoutContainer(node)) {
+      const h = getNodeSizingMode(node, "horizontal") ?? "FIXED"
+      const v = getNodeSizingMode(node, "vertical") ?? "FIXED"
+      css.width = h === "HUG" ? "fit-content" : toPx(width)
+      css.height = v === "HUG" ? "fit-content" : toPx(height)
+      return css
+    }
+    css.width = toPx(width)
+    css.height = toPx(height)
+    return css
+  }
+
+  let horizontal = getNodeSizingMode(node, "horizontal")
+  let vertical = getNodeSizingMode(node, "vertical")
+
+  // Legacy fallbacks when sizing modes are unavailable
+  if (!horizontal || !vertical) {
+    if ("layoutGrow" in node && node.layoutGrow === 1) {
+      if (parentMode === "HORIZONTAL") horizontal = horizontal ?? "FILL"
+      if (parentMode === "VERTICAL") vertical = vertical ?? "FILL"
+    }
+    if ("layoutAlign" in node && node.layoutAlign === "STRETCH") {
+      if (parentMode === "HORIZONTAL") vertical = vertical ?? "FILL"
+      if (parentMode === "VERTICAL") horizontal = horizontal ?? "FILL"
+    }
+  }
+
+  horizontal = horizontal ?? "FIXED"
+  vertical = vertical ?? "FIXED"
+
+  const applyAxis = (
+    mode: SizingMode,
+    axis: "width" | "height",
+    px: number,
+    isPrimary: boolean,
+  ) => {
+    if (mode === "FIXED") {
+      if (axis === "width") css.width = toPx(px)
+      else css.height = toPx(px)
+      return
+    }
+    if (mode === "HUG") {
+      if (axis === "width") css.width = "fit-content"
+      else css.height = "fit-content"
+      return
+    }
+    // FILL
+    if (parentMode === "GRID") {
+      if (axis === "width") {
+        css.width = "100%"
+        css.justifySelf = css.justifySelf ?? "stretch"
+      } else {
+        css.height = "100%"
+        css.alignSelf = css.alignSelf ?? "stretch"
+      }
+      return
+    }
+    if (isPrimary) {
+      css.flexGrow = "1"
+      css.flexShrink = "1"
+      css.flexBasis = "0"
+      // Omit fixed size so flex can grow/shrink
+      return
+    }
+    // Counter-axis FILL → stretch
+    css.alignSelf = "stretch"
+  }
+
+  if (parentMode === "HORIZONTAL") {
+    applyAxis(horizontal, "width", width, true)
+    applyAxis(vertical, "height", height, false)
+  } else if (parentMode === "VERTICAL") {
+    applyAxis(horizontal, "width", width, false)
+    applyAxis(vertical, "height", height, true)
+  } else {
+    // GRID — neither axis is "primary" in the flex sense
+    applyAxis(horizontal, "width", width, false)
+    applyAxis(vertical, "height", height, false)
+  }
+
+  return css
+}
+
+/** Container Auto Layout → flex or grid CSS. */
 export function getLayoutProps(node: SceneNode): Partial<CSSPropsRecord> {
-  if (!("layoutMode" in node)) return { display: "block" }
+  if (!("layoutMode" in node)) return {}
   const n = node as AutoLayoutNode
-  if (n.layoutMode === "NONE") return { display: "block" }
+  if (n.layoutMode === "NONE") return {}
 
-  const css: CSSPropsRecord = {
+  // ── Grid Auto Layout ────────────────────────────────────────────────────
+  if (n.layoutMode === "GRID") {
+    const css: Partial<CSSPropsRecord> = {
+      display: "grid",
+      position: "relative",
+    }
+
+    if ("gridColumnSizes" in n && Array.isArray(n.gridColumnSizes)) {
+      css.gridTemplateColumns = n.gridColumnSizes.map(gridTrackToCss).join(" ")
+    } else if ("gridColumnCount" in n && n.gridColumnCount > 0) {
+      css.gridTemplateColumns = `repeat(${n.gridColumnCount}, 1fr)`
+    }
+
+    if ("gridRowSizes" in n && Array.isArray(n.gridRowSizes)) {
+      css.gridTemplateRows = n.gridRowSizes.map(gridTrackToCss).join(" ")
+    } else if ("gridRowCount" in n && n.gridRowCount > 0) {
+      css.gridTemplateRows = `repeat(${n.gridRowCount}, auto)`
+    }
+
+    if ("gridColumnGap" in n) css.columnGap = toPx(n.gridColumnGap)
+    if ("gridRowGap" in n) css.rowGap = toPx(n.gridRowGap)
+
+    if ("gridItemsPositioning" in n && n.gridItemsPositioning === "ROW_AUTO_FLOW") {
+      css.gridAutoFlow = "row"
+    }
+
+    if ("primaryAxisAlignItems" in n) {
+      css.justifyContent = mapPrimaryAlign(n.primaryAxisAlignItems)
+    }
+    if ("counterAxisAlignItems" in n) {
+      css.alignItems = mapCounterAlign(n.counterAxisAlignItems)
+    }
+
+    applyPadding(n, css)
+    return css
+  }
+
+  // ── Flex Auto Layout (HORIZONTAL / VERTICAL) ─────────────────────────────
+  const css: Partial<CSSPropsRecord> = {
     display: "flex",
+    position: "relative",
     gap: toPx(n.itemSpacing),
     flexDirection: n.layoutMode === "HORIZONTAL" ? "row" : "column",
     flexWrap: n.layoutWrap === "WRAP" ? "wrap" : "nowrap",
   }
 
-  switch (n.primaryAxisAlignItems) {
-    case "MIN":
-      css.justifyContent = "flex-start"
-      break
-    case "MAX":
-      css.justifyContent = "flex-end"
-      break
-    case "CENTER":
-      css.justifyContent = "center"
-      break
-    case "SPACE_BETWEEN":
-      css.justifyContent = "space-between"
-      break
-  }
-
-  switch (n.counterAxisAlignItems) {
-    case "MIN":
-      css.alignItems = "flex-start"
-      break
-    case "MAX":
-      css.alignItems = "flex-end"
-      break
-    case "CENTER":
-      css.alignItems = "center"
-      break
-    case "BASELINE":
-      css.alignItems = "baseline"
-      break
-    default:
-      css.alignItems = "stretch"
-  }
+  css.justifyContent = mapPrimaryAlign(n.primaryAxisAlignItems)
+  css.alignItems = mapCounterAlign(n.counterAxisAlignItems)
 
   if (n.layoutWrap === "WRAP" && "counterAxisAlignContent" in n) {
-    switch (n.counterAxisAlignContent) {
-      case "AUTO":
-        break
-      default:
-        // SPACE_BETWEEN maps directly; MIN/MAX/CENTER handled like above.
-        if (n.counterAxisAlignContent === "SPACE_BETWEEN")
-          css.alignContent = "space-between"
-    }
+    const alignContent = mapAlignContent(n.counterAxisAlignContent)
+    if (alignContent) css.alignContent = alignContent
   }
 
+  applyPadding(n, css)
+  return css
+}
+
+function applyPadding(n: AutoLayoutNode, css: Partial<CSSPropsRecord>): void {
   const { paddingTop, paddingRight, paddingBottom, paddingLeft } = n
   const allEqual =
     paddingTop === paddingRight &&
@@ -340,15 +566,46 @@ export function getLayoutProps(node: SceneNode): Partial<CSSPropsRecord> {
       paddingBottom,
     )} ${toPx(paddingLeft)}`
   }
-
-  return css
 }
 
-/** Child flex props when the parent is an Auto Layout container. */
+/**
+ * Child props when the parent is an Auto Layout container.
+ * Marks absolute children with position:absolute; in-flow children get flex/grid item props.
+ */
 export function getChildFlexProps(node: SceneNode): Partial<CSSPropsRecord> {
+  const parentMode = getParentLayoutMode(node)
+  if (!parentMode || parentMode === "NONE") return {}
+
+  // Absolute-positioned child inside Auto Layout
+  if (isAbsoluteLayoutChild(node)) {
+    return {
+      position: "absolute",
+      // Parent-relative coordinates (Figma x/y are relative to the parent frame)
+      width: toPx(Math.round(node.width)),
+      height: toPx(Math.round(node.height)),
+    }
+  }
+
   const extra: Partial<CSSPropsRecord> = {}
-  if ("layoutGrow" in node && node.layoutGrow === 1) extra.flexGrow = "1"
-  if ("layoutAlign" in node) {
+
+  // Grid child placement
+  if (parentMode === "GRID" && "gridColumnAnchorIndex" in node) {
+    const col = (node as SceneNode & GridChildrenMixin).gridColumnAnchorIndex
+    const row = (node as SceneNode & GridChildrenMixin).gridRowAnchorIndex
+    const colSpan = (node as SceneNode & GridChildrenMixin).gridColumnSpan ?? 1
+    const rowSpan = (node as SceneNode & GridChildrenMixin).gridRowSpan ?? 1
+    if (typeof col === "number") {
+      extra.gridColumn =
+        colSpan > 1 ? `${col + 1} / span ${colSpan}` : String(col + 1)
+    }
+    if (typeof row === "number") {
+      extra.gridRow =
+        rowSpan > 1 ? `${row + 1} / span ${rowSpan}` : String(row + 1)
+    }
+  }
+
+  // Flex item alignment (non-stretch legacy values + stretch)
+  if (parentMode !== "GRID" && "layoutAlign" in node) {
     switch (node.layoutAlign) {
       case "MIN":
         extra.alignSelf = "flex-start"
@@ -362,22 +619,74 @@ export function getChildFlexProps(node: SceneNode): Partial<CSSPropsRecord> {
       case "STRETCH":
         extra.alignSelf = "stretch"
         break
+      // INHERIT — leave to parent align-items
     }
   }
+
+  // layoutGrow legacy (sizing props also cover FILL)
+  if (
+    parentMode !== "GRID" &&
+    "layoutGrow" in node &&
+    node.layoutGrow === 1 &&
+    !extra.flexGrow
+  ) {
+    extra.flexGrow = "1"
+    extra.flexShrink = "1"
+    extra.flexBasis = "0"
+  }
+
   return extra
 }
 
-type CSSPropsRecord = {
-  display: string
-  flexDirection?: string
-  flexWrap?: string
-  justifyContent?: string
-  alignItems?: string
-  alignContent?: string
-  alignSelf?: string
-  flexGrow?: string
-  gap?: string
-  padding?: string
+/**
+ * Build the full CSS props for a node: container layout + child flow + sizing + position.
+ */
+export function buildLayoutCss(
+  node: SceneNode,
+  width: number,
+  height: number,
+): Partial<CSSPropsRecord> {
+  let css: Partial<CSSPropsRecord> = {}
+
+  const parentMode = getParentLayoutMode(node)
+  const inFlow = isInAutoLayoutFlow(node)
+  const isAbsChild =
+    parentMode !== null &&
+    parentMode !== "NONE" &&
+    isAbsoluteLayoutChild(node)
+
+  // Container flex/grid props
+  if (AUTO_LAYOUT_TYPES.includes(node.type)) {
+    css = { ...css, ...getLayoutProps(node) }
+  }
+
+  // Child of Auto Layout
+  if (parentMode && parentMode !== "NONE") {
+    css = { ...css, ...getChildFlexProps(node) }
+  }
+
+  // Sizing (Fixed / Hug / Fill) — absolute children already got fixed px from getChildFlexProps
+  if (!isAbsChild) {
+    // in-flow → use parent mode; freeform → null (fixed px, or Hug for AL containers)
+    const sized = getSizingProps(node, width, height, inFlow ? parentMode : null)
+    css = { ...css, ...sized }
+  }
+
+  // Positioning
+  if (isAbsChild) {
+    css.position = "absolute"
+  } else if (inFlow) {
+    // In-flow: no absolute. Keep relative only for flex/grid containers.
+    if (css.display === "flex" || css.display === "grid") {
+      css.position = "relative"
+    } else {
+      delete css.position
+    }
+  } else {
+    css.position = "absolute"
+  }
+
+  return css
 }
 
 // ── Token / style binding helpers ──────────────────────────────────────────
@@ -518,6 +827,32 @@ export async function extractTypography(node: TextNode): Promise<Typography> {
 }
 
 // 11.12 ── generateCSS ──────────────────────────────────────────────────────
+function emitLayoutDeclarations(extraCss: Partial<CSSPropsRecord>): string[] {
+  const lines: string[] = []
+  if (extraCss.display) lines.push(`  display: ${extraCss.display};`)
+  if (extraCss.flexDirection) lines.push(`  flex-direction: ${extraCss.flexDirection};`)
+  if (extraCss.flexWrap) lines.push(`  flex-wrap: ${extraCss.flexWrap};`)
+  if (extraCss.justifyContent) lines.push(`  justify-content: ${extraCss.justifyContent};`)
+  if (extraCss.alignItems) lines.push(`  align-items: ${extraCss.alignItems};`)
+  if (extraCss.alignContent) lines.push(`  align-content: ${extraCss.alignContent};`)
+  if (extraCss.alignSelf) lines.push(`  align-self: ${extraCss.alignSelf};`)
+  if (extraCss.justifySelf) lines.push(`  justify-self: ${extraCss.justifySelf};`)
+  if (extraCss.flexGrow) lines.push(`  flex-grow: ${extraCss.flexGrow};`)
+  if (extraCss.flexShrink) lines.push(`  flex-shrink: ${extraCss.flexShrink};`)
+  if (extraCss.flexBasis) lines.push(`  flex-basis: ${extraCss.flexBasis};`)
+  if (extraCss.gap) lines.push(`  gap: ${extraCss.gap};`)
+  if (extraCss.rowGap) lines.push(`  row-gap: ${extraCss.rowGap};`)
+  if (extraCss.columnGap) lines.push(`  column-gap: ${extraCss.columnGap};`)
+  if (extraCss.gridTemplateColumns)
+    lines.push(`  grid-template-columns: ${extraCss.gridTemplateColumns};`)
+  if (extraCss.gridTemplateRows)
+    lines.push(`  grid-template-rows: ${extraCss.gridTemplateRows};`)
+  if (extraCss.gridAutoFlow) lines.push(`  grid-auto-flow: ${extraCss.gridAutoFlow};`)
+  if (extraCss.gridColumn) lines.push(`  grid-column: ${extraCss.gridColumn};`)
+  if (extraCss.gridRow) lines.push(`  grid-row: ${extraCss.gridRow};`)
+  return lines
+}
+
 export function generateCSS(
   className: string,
   x: number,
@@ -530,17 +865,28 @@ export function generateCSS(
   extraCss: Partial<CSSPropsRecord>,
 ): string {
   const lines: string[] = []
+  const useAbsolute = extraCss.position === "absolute"
 
-  if (!extraCss.display || extraCss.display === "absolute") {
+  if (useAbsolute) {
     lines.push(`  position: absolute;`)
     lines.push(`  left: ${x}px;`)
     lines.push(`  top: ${y}px;`)
-  } else {
+  } else if (extraCss.position === "relative") {
     lines.push(`  position: relative;`)
   }
 
-  lines.push(`  width: ${width}px;`)
-  lines.push(`  height: ${height}px;`)
+  // Prefer explicit sizing from layout props; fall back to fixed px for absolute/freeform
+  if (extraCss.width !== undefined) {
+    lines.push(`  width: ${extraCss.width};`)
+  } else if (useAbsolute) {
+    lines.push(`  width: ${width}px;`)
+  }
+
+  if (extraCss.height !== undefined) {
+    lines.push(`  height: ${extraCss.height};`)
+  } else if (useAbsolute) {
+    lines.push(`  height: ${height}px;`)
+  }
 
   if (styles.backgroundColor && styles.backgroundColor !== "transparent")
     lines.push(`  background-color: ${styles.backgroundColor};`)
@@ -567,22 +913,32 @@ export function generateCSS(
     lines.push(`  text-align: ${typography.textAlign};`)
   }
 
-  if (extraCss.display && extraCss.display !== "block" && extraCss.display !== "absolute") {
-    lines.push(`  display: ${extraCss.display};`)
-    if (extraCss.flexDirection) lines.push(`  flex-direction: ${extraCss.flexDirection};`)
-    if (extraCss.flexWrap) lines.push(`  flex-wrap: ${extraCss.flexWrap};`)
-    if (extraCss.justifyContent) lines.push(`  justify-content: ${extraCss.justifyContent};`)
-    if (extraCss.alignItems) lines.push(`  align-items: ${extraCss.alignItems};`)
-    if (extraCss.alignContent) lines.push(`  align-content: ${extraCss.alignContent};`)
-    if (extraCss.gap) lines.push(`  gap: ${extraCss.gap};`)
-  }
-  if (extraCss.alignSelf) lines.push(`  align-self: ${extraCss.alignSelf};`)
-  if (extraCss.flexGrow) lines.push(`  flex-grow: ${extraCss.flexGrow};`)
+  lines.push(...emitLayoutDeclarations(extraCss))
 
   return `.${className} {\n${lines.join("\n")}\n}`
 }
 
 // 11.13 ── generateTailwind ─────────────────────────────────────────────────
+function sizeToTailwind(prefix: "w" | "h", value: string | undefined): string | null {
+  if (!value) return null
+  if (value === "fit-content") return `${prefix}-fit`
+  if (value === "100%") return `${prefix}-full`
+  if (value === "auto") return `${prefix}-auto`
+  // px value e.g. "120px"
+  const m = /^(\d+(?:\.\d+)?)px$/.exec(value)
+  if (m) return `${prefix}-[${m[1]}px]`
+  return `${prefix}-[${value}]`
+}
+
+function gapToTailwind(pxValue: string | undefined): string | null {
+  if (!pxValue) return null
+  const n = parseFloat(pxValue)
+  if (Number.isNaN(n)) return null
+  const scaled = n / 4
+  if (Number.isInteger(scaled) && scaled >= 0 && scaled <= 96) return `gap-${scaled}`
+  return `gap-[${pxValue}]`
+}
+
 export function generateTailwind(
   x: number,
   y: number,
@@ -591,14 +947,88 @@ export function generateTailwind(
   styles: Styles,
   layout: Layout,
   typography: Typography | null,
+  extraCss: Partial<CSSPropsRecord> = {},
 ): string {
-  const parts: string[] = [
-    "absolute",
-    `left-[${x}px]`,
-    `top-[${y}px]`,
-    `w-[${width}px]`,
-    `h-[${height}px]`,
-  ]
+  const parts: string[] = []
+  const useAbsolute = extraCss.position === "absolute"
+
+  if (useAbsolute) {
+    parts.push("absolute")
+    parts.push(`left-[${x}px]`)
+    parts.push(`top-[${y}px]`)
+  } else if (extraCss.position === "relative") {
+    parts.push("relative")
+  }
+
+  // Display / flex / grid container
+  if (extraCss.display === "flex") {
+    parts.push("flex")
+    if (extraCss.flexDirection === "column") parts.push("flex-col")
+    if (extraCss.flexWrap === "wrap") parts.push("flex-wrap")
+    if (extraCss.justifyContent === "flex-start") parts.push("justify-start")
+    else if (extraCss.justifyContent === "flex-end") parts.push("justify-end")
+    else if (extraCss.justifyContent === "center") parts.push("justify-center")
+    else if (extraCss.justifyContent === "space-between") parts.push("justify-between")
+    if (extraCss.alignItems === "flex-start") parts.push("items-start")
+    else if (extraCss.alignItems === "flex-end") parts.push("items-end")
+    else if (extraCss.alignItems === "center") parts.push("items-center")
+    else if (extraCss.alignItems === "baseline") parts.push("items-baseline")
+    else if (extraCss.alignItems === "stretch") parts.push("items-stretch")
+    if (extraCss.alignContent === "flex-start") parts.push("content-start")
+    else if (extraCss.alignContent === "flex-end") parts.push("content-end")
+    else if (extraCss.alignContent === "center") parts.push("content-center")
+    else if (extraCss.alignContent === "space-between") parts.push("content-between")
+    const gapClass = gapToTailwind(extraCss.gap)
+    if (gapClass) parts.push(gapClass)
+  } else if (extraCss.display === "grid") {
+    parts.push("grid")
+    if (extraCss.gridTemplateColumns)
+      parts.push(`grid-cols-[${extraCss.gridTemplateColumns.replace(/\s+/g, "_")}]`)
+    if (extraCss.gridTemplateRows)
+      parts.push(`grid-rows-[${extraCss.gridTemplateRows.replace(/\s+/g, "_")}]`)
+    if (extraCss.gridAutoFlow === "row") parts.push("grid-flow-row")
+    if (extraCss.columnGap) {
+      const g = gapToTailwind(extraCss.columnGap)
+      if (g) parts.push(g.replace("gap-", "gap-x-"))
+      else parts.push(`gap-x-[${extraCss.columnGap}]`)
+    }
+    if (extraCss.rowGap) {
+      const g = gapToTailwind(extraCss.rowGap)
+      if (g) parts.push(g.replace("gap-", "gap-y-"))
+      else parts.push(`gap-y-[${extraCss.rowGap}]`)
+    }
+    if (extraCss.justifyContent === "flex-start") parts.push("justify-start")
+    else if (extraCss.justifyContent === "flex-end") parts.push("justify-end")
+    else if (extraCss.justifyContent === "center") parts.push("justify-center")
+    else if (extraCss.justifyContent === "space-between") parts.push("justify-between")
+    if (extraCss.alignItems === "flex-start") parts.push("items-start")
+    else if (extraCss.alignItems === "flex-end") parts.push("items-end")
+    else if (extraCss.alignItems === "center") parts.push("items-center")
+    else if (extraCss.alignItems === "stretch") parts.push("items-stretch")
+  }
+
+  // Flex/grid item props
+  if (extraCss.flexGrow === "1" && extraCss.flexBasis === "0") parts.push("flex-1")
+  else if (extraCss.flexGrow === "1") parts.push("grow")
+  if (extraCss.alignSelf === "flex-start") parts.push("self-start")
+  else if (extraCss.alignSelf === "flex-end") parts.push("self-end")
+  else if (extraCss.alignSelf === "center") parts.push("self-center")
+  else if (extraCss.alignSelf === "stretch") parts.push("self-stretch")
+  if (extraCss.justifySelf === "stretch") parts.push("justify-self-stretch")
+  if (extraCss.gridColumn) parts.push(`col-[${extraCss.gridColumn.replace(/\s+/g, "_")}]`)
+  if (extraCss.gridRow) parts.push(`row-[${extraCss.gridRow.replace(/\s+/g, "_")}]`)
+
+  // Sizing
+  const wClass = sizeToTailwind(
+    "w",
+    extraCss.width ?? (useAbsolute ? `${width}px` : undefined),
+  )
+  const hClass = sizeToTailwind(
+    "h",
+    extraCss.height ?? (useAbsolute ? `${height}px` : undefined),
+  )
+  if (wClass) parts.push(wClass)
+  if (hClass) parts.push(hClass)
 
   const bg = styles.backgroundColor
   if (bg && bg !== "transparent") {
@@ -645,6 +1075,12 @@ export function generateTailwind(
 }
 
 // 11.14 ── generateReact (inline style object literal) ──────────────────────
+function cssSizeToReact(value: string): string {
+  const m = /^(\d+(?:\.\d+)?)px$/.exec(value)
+  if (m) return m[1] // numeric px for React inline styles
+  return `'${value}'`
+}
+
 export function generateReact(
   x: number,
   y: number,
@@ -656,18 +1092,27 @@ export function generateReact(
   extraCss: Partial<CSSPropsRecord>,
 ): string {
   const props: string[] = []
-  const relative =
-    extraCss.display && extraCss.display !== "block" && extraCss.display !== "absolute"
+  const useAbsolute = extraCss.position === "absolute"
 
-  if (relative) {
-    props.push(`position: 'relative'`)
-  } else {
+  if (useAbsolute) {
     props.push(`position: 'absolute'`)
     props.push(`left: ${x}`)
     props.push(`top: ${y}`)
+  } else if (extraCss.position === "relative") {
+    props.push(`position: 'relative'`)
   }
-  props.push(`width: ${width}`)
-  props.push(`height: ${height}`)
+
+  if (extraCss.width !== undefined) {
+    props.push(`width: ${cssSizeToReact(extraCss.width)}`)
+  } else if (useAbsolute) {
+    props.push(`width: ${width}`)
+  }
+
+  if (extraCss.height !== undefined) {
+    props.push(`height: ${cssSizeToReact(extraCss.height)}`)
+  } else if (useAbsolute) {
+    props.push(`height: ${height}`)
+  }
 
   if (styles.backgroundColor && styles.backgroundColor !== "transparent")
     props.push(`backgroundColor: '${styles.backgroundColor}'`)
@@ -695,17 +1140,27 @@ export function generateReact(
     props.push(`textAlign: '${typography.textAlign}'`)
   }
 
-  if (relative) {
-    props.push(`display: '${extraCss.display}'`)
-    if (extraCss.flexDirection) props.push(`flexDirection: '${extraCss.flexDirection}'`)
-    if (extraCss.flexWrap) props.push(`flexWrap: '${extraCss.flexWrap}'`)
-    if (extraCss.justifyContent) props.push(`justifyContent: '${extraCss.justifyContent}'`)
-    if (extraCss.alignItems) props.push(`alignItems: '${extraCss.alignItems}'`)
-    if (extraCss.alignContent) props.push(`alignContent: '${extraCss.alignContent}'`)
-    if (extraCss.gap) props.push(`gap: '${extraCss.gap}'`)
-  }
+  if (extraCss.display) props.push(`display: '${extraCss.display}'`)
+  if (extraCss.flexDirection) props.push(`flexDirection: '${extraCss.flexDirection}'`)
+  if (extraCss.flexWrap) props.push(`flexWrap: '${extraCss.flexWrap}'`)
+  if (extraCss.justifyContent) props.push(`justifyContent: '${extraCss.justifyContent}'`)
+  if (extraCss.alignItems) props.push(`alignItems: '${extraCss.alignItems}'`)
+  if (extraCss.alignContent) props.push(`alignContent: '${extraCss.alignContent}'`)
   if (extraCss.alignSelf) props.push(`alignSelf: '${extraCss.alignSelf}'`)
+  if (extraCss.justifySelf) props.push(`justifySelf: '${extraCss.justifySelf}'`)
   if (extraCss.flexGrow) props.push(`flexGrow: ${extraCss.flexGrow}`)
+  if (extraCss.flexShrink) props.push(`flexShrink: ${extraCss.flexShrink}`)
+  if (extraCss.flexBasis) props.push(`flexBasis: '${extraCss.flexBasis}'`)
+  if (extraCss.gap) props.push(`gap: '${extraCss.gap}'`)
+  if (extraCss.rowGap) props.push(`rowGap: '${extraCss.rowGap}'`)
+  if (extraCss.columnGap) props.push(`columnGap: '${extraCss.columnGap}'`)
+  if (extraCss.gridTemplateColumns)
+    props.push(`gridTemplateColumns: '${extraCss.gridTemplateColumns}'`)
+  if (extraCss.gridTemplateRows)
+    props.push(`gridTemplateRows: '${extraCss.gridTemplateRows}'`)
+  if (extraCss.gridAutoFlow) props.push(`gridAutoFlow: '${extraCss.gridAutoFlow}'`)
+  if (extraCss.gridColumn) props.push(`gridColumn: '${extraCss.gridColumn}'`)
+  if (extraCss.gridRow) props.push(`gridRow: '${extraCss.gridRow}'`)
 
   return `{ ${props.join(", ")} }`
 }
@@ -740,8 +1195,6 @@ export function nodeToLayer(node: SceneNode, frameNode?: SceneNode): Layer | nul
 }
 
 // 11.11 ── nodeToLayerDetail (async — resolves typography + code) ────────────
-const AUTO_LAYOUT_TYPES = ["FRAME", "COMPONENT", "INSTANCE"]
-
 export async function nodeToLayerDetail(
   node: SceneNode,
   frameNode?: SceneNode,
@@ -809,24 +1262,25 @@ export async function nodeToLayerDetail(
     ...(effectStyle ? { effectStyle } : {}),
   }
 
-  let extraCss: Partial<CSSPropsRecord> = {}
-  if (AUTO_LAYOUT_TYPES.includes(node.type)) {
-    extraCss = { ...extraCss, ...getLayoutProps(node) }
-  }
-  if (
-    node.parent &&
-    "layoutMode" in node.parent &&
-    (node.parent as AutoLayoutNode).layoutMode !== "NONE"
-  ) {
-    extraCss = { ...extraCss, ...getChildFlexProps(node) }
-  }
+  const extraCss = buildLayoutCss(node, width, height)
+
+  // Absolute children inside Auto Layout use parent-relative x/y (node.x/y).
+  // Freeform layers keep frame-relative bounds for overlay/inspect consistency.
+  const codeX =
+    extraCss.position === "absolute" && isAbsoluteLayoutChild(node)
+      ? Math.round(node.x)
+      : x
+  const codeY =
+    extraCss.position === "absolute" && isAbsoluteLayoutChild(node)
+      ? Math.round(node.y)
+      : y
 
   const className = node.name.toLowerCase().replace(/\s+/g, "-")
 
   const code: Code = {
-    css: generateCSS(className, x, y, width, height, styles, layout, typography, extraCss),
-    tailwind: generateTailwind(x, y, width, height, styles, layout, typography),
-    react: generateReact(x, y, width, height, styles, layout, typography, extraCss),
+    css: generateCSS(className, codeX, codeY, width, height, styles, layout, typography, extraCss),
+    tailwind: generateTailwind(codeX, codeY, width, height, styles, layout, typography, extraCss),
+    react: generateReact(codeX, codeY, width, height, styles, layout, typography, extraCss),
   }
 
   return {

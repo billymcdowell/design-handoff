@@ -4,7 +4,10 @@ set -e
 cd /pb
 
 echo "Applying database migrations..."
-./pocketbase migrate up
+if ! ./pocketbase migrate up; then
+  echo "ERROR: migrations failed — refusing to start." >&2
+  exit 1
+fi
 echo "Migrations complete."
 
 # Optional: non-interactive bootstrap (CI / automation only).

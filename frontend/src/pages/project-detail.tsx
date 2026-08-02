@@ -5,12 +5,12 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { SearchInput } from "@/components/search-input"
 import { FramesTable } from "@/features/frames/components/frames-table"
-import { useProject, useProjectFrames } from "@/hooks/data"
+import { useProject, useLatestFramesByProject } from "@/hooks/data"
 
 export default function ProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>()
   const { data: project } = useProject(projectId)
-  const { data: frames, isLoading, refetch } = useProjectFrames(projectId)
+  const { data: frames, isLoading, refetch } = useLatestFramesByProject(projectId)
   const [query, setQuery] = useState("")
 
   const filtered = useMemo(() => {
