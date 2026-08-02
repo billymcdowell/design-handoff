@@ -1,0 +1,16 @@
+{
+  "name": "design-handoff",
+  "id": "com.design-handoff.plugin",
+  "api": "1.0.0",
+  "main": "dist/code.js",
+  "ui": "dist/index.html",
+  "editorType": ["figma", "figjam"],
+  "documentAccess": "dynamic-page",
+  "capabilities": [],
+  "enableProposedApi": false,
+  "networkAccess": {
+    "allowedDomains": ["none"],
+    "devAllowedDomains": ["http://localhost:8090"],
+    "reasoning": "During development the plugin talks to a local PocketBase instance on localhost:8090 to publish projects/frames/layers. Add your production PocketBase origin to allowedDomains before publishing."
+  }
+}

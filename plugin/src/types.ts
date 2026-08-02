@@ -1,0 +1,229 @@
+// ─── Shared type definitions ──────────────────────────────────────────────
+// The plugin builds these camelCase structures internally, then maps them onto
+// stock PocketBase fields at upload time (see src/main/upload.ts).
+
+// --- Backend entities (plugin-internal shape) ---
+
+export interface Project {
+  id: string
+  name: string
+  thumbnail: string
+  figmaFileUrl: string
+  frameCount: number
+  lastUpdated: string
+  createdBy: string
+}
+
+export interface Frame {
+  id: string // "frame_{sanitized_figma_id}"
+  name: string
+  width: number // Math.round
+  height: number // Math.round
+  thumbnail: string // placeholder SVG URL
+  figmaUrl: string // deep link with node-id
+}
+
+export interface Layer {
+  id: string // raw Figma node.id (NOT sanitized)
+  name: string
+  type: string // Figma node.type string e.g. "FRAME", "TEXT"
+  x: number
+  y: number
+  width: number
+  height: number
+  clickable: boolean // always true
+  children?: Layer[]
+}
+
+export interface FrameDetail extends Frame {
+  imageUrl: string // "" or "__PENDING_UPLOAD__…" — real bytes live in main's image store
+  layers: Layer[] // hierarchical tree, depth 0 = direct children of frame
+}
+
+export interface Layout {
+  position: { x: number; y: number }
+  dimensions: { width: number; height: number }
+  padding?: { top: number; right: number; bottom: number; left: number }
+  margin?: { top: number; right: number; bottom: number; left: number }
+}
+
+/** Figma variable or style reference resolved at publish time. */
+export interface TokenRef {
+  id: string
+  name: string
+}
+
+/** A single Figma effect, serialized for the frame inspector. */
+export interface EffectDetail {
+  /** Figma effect type, e.g. "DROP_SHADOW", "LAYER_BLUR". */
+  type: string
+  /** Human-readable label matching Figma's Effects UI. */
+  name: string
+  /** Display-ready property rows for the inspector. */
+  properties: Array<{ label: string; value: string }>
+}
+
+export interface Styles {
+  backgroundColor: string
+  borderRadius?: string
+  borderWidth?: string
+  borderColor?: string
+  boxShadow?: string
+  opacity: number
+  /** Per-effect breakdown (drop shadow, blurs, noise, glass, etc.). */
+  effects?: EffectDetail[]
+  /** Color variable bound to the primary fill (non-text layers). */
+  backgroundColorToken?: TokenRef
+  /** Color variable bound to the primary stroke. */
+  borderColorToken?: TokenRef
+  /** Applied local/library effect style (shadows, blurs, etc.). */
+  effectStyle?: TokenRef
+}
+
+export interface Typography {
+  fontFamily: string
+  fontSize: string // e.g. "16px"
+  fontWeight: number | string
+  lineHeight: string // e.g. "24px"
+  letterSpacing: string // e.g. "0px"
+  color: string
+  textAlign: string // "left" | "center" | "right"
+  textDecoration: string // "underline" | "none"
+  textTransform: string // always "none"
+  /** Applied local/library text style. */
+  textStyle?: TokenRef
+  /** Color variable bound to the text fill. */
+  colorToken?: TokenRef
+}
+
+export interface Code {
+  css: string
+  tailwind: string
+  react: string
+}
+
+export interface LayerDetail {
+  id: string
+  name: string
+  type: string
+  x: number
+  y: number
+  width: number
+  height: number
+  layout: Layout
+  styles: Styles
+  typography: Typography | null
+  code: Code
+}
+
+export interface BackendPayload {
+  project: Project
+  projectFrames: {
+    projectId: string
+    frames: Frame[]
+  }
+  frames: Record<string, FrameDetail> // keyed by Frame.id (frame_xxx)
+  layers: Record<string, LayerDetail> // keyed by Figma node.id
+  // A `version` object is intentionally NOT part of the payload.
+}
+
+export type UploadStatus =
+  | "idle"
+  | "processing"
+  | "uploading"
+  | "complete"
+  | "error"
+
+export interface UploadProgress {
+  current: number
+  total: number
+  currentItemName: string
+  status: UploadStatus
+  apiCallCount?: number
+}
+
+// --- Foundational export ---
+
+export interface FoundationalExport {
+  variables: Record<string, VariableCollectionExport>
+  styles: {
+    paint: PaintStyleExport[]
+    text: TextStyleExport[]
+    effect: EffectStyleExport[]
+    grid: GridStyleExport[]
+  }
+}
+
+export interface VariableCollectionExport {
+  id: string
+  name: string
+  modes: { modeId: string; name: string }[]
+  variables: VariableExport[]
+}
+
+export interface VariableExport {
+  id: string
+  name: string
+  type: string // "BOOLEAN" | "FLOAT" | "STRING" | "COLOR"
+  valuesByMode: Record<string, unknown>
+  description: string
+  scopes: string[]
+  codeSyntax: Record<string, string>
+}
+
+export interface BaseStyleExport {
+  id: string
+  name: string
+  description: string
+  type: string
+}
+
+export interface PaintStyleExport extends BaseStyleExport {
+  paints: unknown[]
+}
+
+export interface TextStyleExport extends BaseStyleExport {
+  fontName: { family: string; style: string }
+  fontSize: number
+  fontWeight: number // hardcoded 400 placeholder
+  lineHeight: unknown
+  letterSpacing: unknown
+  textDecoration: string
+  paragraphIndent: number
+  paragraphSpacing: number
+  textCase: string
+}
+
+export interface EffectStyleExport extends BaseStyleExport {
+  effects: unknown[]
+}
+
+export interface GridStyleExport extends BaseStyleExport {
+  layoutGrids: unknown[]
+}
+
+// --- Internal CSS helper type ---
+
+export interface CSSData {
+  display: string
+  flexDirection?: string
+  flexWrap?: string
+  justifyContent?: string
+  alignItems?: string
+  alignContent?: string
+  alignSelf?: string
+  flexGrow?: string | number
+  gap?: string
+  padding?: string
+  width: string
+  height: string
+  backgroundColor?: string
+  borderRadius?: string
+  color?: string
+  fontSize?: string
+  fontFamily?: string
+}
+
+// --- Message protocol ---
+
+export type PluginMessage = { type: string; [key: string]: unknown }

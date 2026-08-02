@@ -1,0 +1,34 @@
+{
+  "name": "design-handoff-plugin",
+  "version": "1.0.0",
+  "description": "Design Handoff — Figma/FigJam plugin that extracts design specs and publishes them to a stock PocketBase backend.",
+  "license": "MIT",
+  "scripts": {
+    "prebuild": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "build:main": "vite build -c vite.config.main.ts",
+    "build:ui": "vite build -c vite.config.ui.ts",
+    "build": "npm run prebuild && npm run typecheck && npm run build:main && npm run build:ui",
+    "watch:main": "vite build -c vite.config.main.ts --watch",
+    "watch:ui": "vite build -c vite.config.ui.ts --watch",
+    "watch": "npm run build:main && npm run build:ui && (npm run watch:main & npm run watch:ui)",
+    "lint": "eslint src"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "@figma/eslint-plugin-figma-plugins": "*",
+    "@figma/plugin-typings": "*",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "eslint": "^9.39.4",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.57.1",
+    "vite": "^6.0.7",
+    "vite-plugin-singlefile": "^2.1.0"
+  }
+}
