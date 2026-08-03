@@ -131,6 +131,19 @@ this single record for the authenticated user. Re-syncing from the same file
 replaces that file’s token slice only; other files’ tokens are kept. Every
 project reads the same foundations.
 
+### 7. `feedback` — product feedback about Design Handoff
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `author` | relation → `users` | required — submitting user |
+| `type` | select | required; `bug` \| `idea` \| `ux` |
+| `message` | text | required, 1–5000 chars |
+| `page` | text | optional — URL/path where it was submitted |
+
+Any authenticated user can **create** (with `author = @request.auth.id`, or
+Admin via a linked `users` row). List / view / update / delete are Admin-only
+(null rules — review in Admin UI → Collections → `feedback`).
+
 ---
 
 ## Versioning model (no versions table)
@@ -272,6 +285,7 @@ All authenticated users can **list/view** every record. Mutations require
 | `layers` | any authed user | designer only |
 | `layer_details` | any authed user | designer only |
 | `foundations` | any authed user | designer only (and `owner = @request.auth.id` on write) |
+| `feedback` | Admin only | create: any authed user (`author = self`, or Admin); update/delete: Admin only |
 
 ---
 
@@ -303,7 +317,7 @@ timeout 30s) so the plugin can chunk layer / layer_detail creates.
 1. Open Admin → **Settings → Import collections**
 2. Upload [`schema.json`](schema.json) (same contents as `pb_collections_import.json`)
 3. Leave **Delete missing collections** unchecked (keeps the built-in `users` collection and merges fields)
-4. Confirm — this adds `projects` / `sections` / `frames` / `layers` / `layer_details` / `foundations` **and** the `users.role` field (`designer` | `developer`)
+4. Confirm — this adds `projects` / `sections` / `frames` / `layers` / `layer_details` / `foundations` / `feedback` **and** the `users.role` field (`designer` | `developer`)
 
 Then create login users as needed:
 

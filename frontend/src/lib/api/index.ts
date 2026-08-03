@@ -2,7 +2,17 @@ import { pb } from "../pocketbase"
 import { resolveOwnerUserId } from "../auth"
 import { framesByNameFilter, projectFilter, escapeFilterValue } from "../pb-filter"
 import { removeFoundationSourceFromData } from "@/features/foundations/catalog"
-import type { Foundation, FoundationsData, Frame, Layer, LayerDetail, Project, Section } from "../types"
+import type {
+  Feedback,
+  FeedbackType,
+  Foundation,
+  FoundationsData,
+  Frame,
+  Layer,
+  LayerDetail,
+  Project,
+  Section,
+} from "../types"
 
 // ─── Projects ───────────────────────────────────────────────
 /** All projects visible to the signed-in user (admins + developers). */
@@ -271,5 +281,20 @@ export async function removeFoundationSource(
     data: result.data,
     variables_count: result.counts.variables_count,
     styles_count: result.counts.styles_count,
+  })
+}
+
+// ─── Feedback (create by any authed user; Admin reads in PocketBase) ─
+export async function createFeedback(data: {
+  type: FeedbackType
+  message: string
+  page?: string
+}): Promise<Feedback> {
+  const author = await resolveOwnerUserId({ createIfMissing: true })
+  return pb.collection("feedback").create<Feedback>({
+    author,
+    type: data.type,
+    message: data.message,
+    page: data.page,
   })
 }

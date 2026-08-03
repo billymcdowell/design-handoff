@@ -1110,5 +1110,110 @@
     "indexes": [
       "CREATE UNIQUE INDEX `idx_foundations_owner` ON `foundations` (`owner`)"
     ]
+  },
+  {
+    "id": "feedback00000001",
+    "name": "feedback",
+    "type": "base",
+    "system": false,
+    "listRule": null,
+    "viewRule": null,
+    "createRule": "@request.auth.id != \"\" && (@request.body.author = @request.auth.id || @request.auth.collectionName = \"_superusers\")",
+    "updateRule": null,
+    "deleteRule": null,
+    "fields": [
+      {
+        "autogeneratePattern": "[a-z0-9]{15}",
+        "help": "",
+        "hidden": false,
+        "id": "_pbf_text_id_",
+        "max": 15,
+        "min": 15,
+        "name": "id",
+        "pattern": "^[a-z0-9]+$",
+        "presentable": false,
+        "primaryKey": true,
+        "required": true,
+        "system": true,
+        "type": "text"
+      },
+      {
+        "cascadeDelete": false,
+        "collectionId": "_pb_users_auth_",
+        "help": "Submitting user",
+        "hidden": false,
+        "id": "rel_feedback_author",
+        "maxSelect": 1,
+        "minSelect": 0,
+        "name": "author",
+        "presentable": false,
+        "required": true,
+        "system": false,
+        "type": "relation"
+      },
+      {
+        "hidden": false,
+        "id": "sel_feedback_type",
+        "maxSelect": 1,
+        "name": "type",
+        "presentable": false,
+        "required": true,
+        "system": false,
+        "type": "select",
+        "values": ["bug", "idea", "ux"]
+      },
+      {
+        "autogeneratePattern": "",
+        "hidden": false,
+        "id": "txt_feedback_message",
+        "max": 5000,
+        "min": 1,
+        "name": "message",
+        "pattern": "",
+        "presentable": true,
+        "primaryKey": false,
+        "required": true,
+        "system": false,
+        "type": "text"
+      },
+      {
+        "autogeneratePattern": "",
+        "help": "URL or path where feedback was submitted",
+        "hidden": false,
+        "id": "txt_feedback_page",
+        "max": 2000,
+        "min": 0,
+        "name": "page",
+        "pattern": "",
+        "presentable": false,
+        "primaryKey": false,
+        "required": false,
+        "system": false,
+        "type": "text"
+      },
+      {
+        "hidden": false,
+        "id": "_pbf_autodate_created_",
+        "name": "created",
+        "onCreate": true,
+        "onUpdate": false,
+        "presentable": false,
+        "system": false,
+        "type": "autodate"
+      },
+      {
+        "hidden": false,
+        "id": "_pbf_autodate_updated_",
+        "name": "updated",
+        "onCreate": true,
+        "onUpdate": true,
+        "presentable": false,
+        "system": false,
+        "type": "autodate"
+      }
+    ],
+    "indexes": [
+      "CREATE INDEX `idx_feedback_author` ON `feedback` (`author`)"
+    ]
   }
 ]

@@ -252,3 +252,17 @@ export type FoundationsData = {
   catalog?: Record<string, FoundationToken>
   history?: FoundationHistoryEntry[]
 }
+
+export const FEEDBACK_TYPES = ["bug", "idea", "ux"] as const
+export type FeedbackType = (typeof FEEDBACK_TYPES)[number]
+
+/** Product feedback about Design Handoff (Admin reviews in PocketBase). */
+export interface Feedback extends RecordModel {
+  author: string
+  type: FeedbackType
+  message: string
+  page?: string
+  expand?: {
+    author?: User
+  }
+}

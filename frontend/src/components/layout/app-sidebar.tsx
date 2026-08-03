@@ -1,8 +1,10 @@
+import { useState } from "react"
 import { Link, useLocation } from "react-router"
-import { Folder, Layers, Palette, Plus } from "lucide-react"
+import { Folder, Layers, MessageSquarePlus, Palette, Plus } from "lucide-react"
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -11,12 +13,14 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
+import { FeedbackDialog } from "@/features/feedback/components/feedback-dialog"
 import type { Project } from "@/lib/types"
 import { useAuth } from "@/providers/auth-provider"
 
 export function AppSidebar({ projects }: { projects: Project[] }) {
   const { pathname } = useLocation()
   const { canManage } = useAuth()
+  const [feedbackOpen, setFeedbackOpen] = useState(false)
 
   return (
     <Sidebar>
@@ -91,6 +95,17 @@ export function AppSidebar({ projects }: { projects: Project[] }) {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
+      <SidebarFooter>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton onClick={() => setFeedbackOpen(true)}>
+              <MessageSquarePlus />
+              <span>Send feedback</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarFooter>
+      <FeedbackDialog open={feedbackOpen} onOpenChange={setFeedbackOpen} />
     </Sidebar>
   )
 }

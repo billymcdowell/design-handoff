@@ -41,7 +41,7 @@ Then:
 2. Sign in to the app with that user (designers can manage; developers view).
 3. Point the Figma plugin at your server — designers sign in with the same email/password (see below).
 
-On first start the container runs `pocketbase migrate up`, which creates all collections (`projects`, `sections`, `frames`, `layers`, `layer_details`, `foundations`, plus the `users.role` field). Rebuild after schema/migration changes so Docker picks them up:
+On first start the container runs `pocketbase migrate up`, which creates all collections (`projects`, `sections`, `frames`, `layers`, `layer_details`, `foundations`, `feedback`, plus the `users.role` field). Rebuild after schema/migration changes so Docker picks them up:
 
 ```bash
 docker compose up -d --build

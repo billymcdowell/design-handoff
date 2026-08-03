@@ -6,12 +6,14 @@ import {
   Clock,
   Layers as LayersIcon,
   Link2,
+  MessageSquarePlus,
   Minus,
   Plus,
   Search,
   Trash2,
   X,
 } from "lucide-react"
+import { FeedbackDialog } from "@/features/feedback/components/feedback-dialog"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
@@ -213,6 +215,7 @@ export default function FrameViewerPage({
   const [overlappingLayers, setOverlappingLayers] = useState<Layer[]>([])
   const [menuHoveredLayerId, setMenuHoveredLayerId] = useState<string | null>(null)
   const [layerSearch, setLayerSearch] = useState("")
+  const [feedbackOpen, setFeedbackOpen] = useState(false)
 
   const canvasRef = useRef<HTMLDivElement>(null)
   const dragState = useRef<{ active: boolean; startX: number; startY: number; moved: boolean }>({
@@ -424,6 +427,14 @@ export default function FrameViewerPage({
         </div>
 
         <div className="ml-auto flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setFeedbackOpen(true)}
+          >
+            <MessageSquarePlus className="size-4" />
+            Feedback
+          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -730,6 +741,7 @@ export default function FrameViewerPage({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      <FeedbackDialog open={feedbackOpen} onOpenChange={setFeedbackOpen} />
     </div>
   )
 }
