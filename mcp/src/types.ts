@@ -13,6 +13,8 @@ export interface Project {
 export interface Frame {
   id: string
   project: string
+  /** Optional project section id for grouping screens. */
+  section?: string
   name: string
   width?: number
   height?: number

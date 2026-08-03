@@ -32,6 +32,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { createUserProject, updateUserProject, deleteUserProject } from "@/lib/api"
 import { projectThumbnailSrc } from "@/lib/files"
+import { copyShareLink, projectShareUrl } from "@/lib/share"
 import { toast } from "@/lib/toast"
 import type { Project } from "@/lib/types"
 import { useAuth } from "@/providers/auth-provider"
@@ -148,23 +149,30 @@ function ProjectCard({
               {project.name}
             </Link>
           </CardTitle>
-          {canManage && (
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <Button variant="ghost" size="icon-sm" aria-label="Project actions">
-                    <MoreVertical className="size-4" />
-                  </Button>
-                }
-              />
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={onEdit}>Edit</DropdownMenuItem>
-                <DropdownMenuItem variant="destructive" onClick={onDelete}>
-                  Delete
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button variant="ghost" size="icon-sm" aria-label="Project actions">
+                  <MoreVertical className="size-4" />
+                </Button>
+              }
+            />
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                onClick={() => void copyShareLink(projectShareUrl(project.id))}
+              >
+                Copy link
+              </DropdownMenuItem>
+              {canManage && (
+                <>
+                  <DropdownMenuItem onClick={onEdit}>Edit</DropdownMenuItem>
+                  <DropdownMenuItem variant="destructive" onClick={onDelete}>
+                    Delete
+                  </DropdownMenuItem>
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </CardHeader>
       <CardFooter className="text-muted-foreground flex items-center justify-between text-xs">

@@ -16,8 +16,12 @@ records API with cookie/token auth. The schema is applied by
 > **Note for the plugin:** earlier plugin drafts referenced custom `*_id` fields
 > and `/bulk` endpoints. Against stock PocketBase, use the **native relation
 > field names below** (`project`, `frame`, `parent`, `layer`, `owner`) and the
-> stock records API. To create many records, loop `pb.collection('x').create()`
-> (optionally inside `pb.autoCancellation(false)` / batched requests).
+> stock records API. Bulk writes use stock `POST /api/batch` (enabled by
+> migration `1785666600_enable_batch_api.js`: maxRequests 50, timeout 30s).
+> The plugin batches `layers` / `layer_details` as JSON chunks of ≤50 with
+> client-pregenerated ids; frame PNG creates stay as individual multipart
+> `POST /api/collections/frames/records` (PocketBase advises against large
+> file uploads inside batch transactions).
 
 ---
 
@@ -56,11 +60,20 @@ email for that relation.
 | `figma_file_url` | url | optional |
 | `frame_count` | number (int) | denormalized count, default 0 |
 
-### 2. `frames`  — one row per version snapshot
+### 2. `sections` — optional groupings of screens within a project
 
 | Field | Type | Notes |
 | --- | --- | --- |
 | `project` | relation → `projects` | required, cascade delete |
+| `name` | text | required, min 1 |
+| `sort_order` | number | optional — display order in the project |
+
+### 3. `frames`  — one row per version snapshot
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `project` | relation → `projects` | required, cascade delete |
+| `section` | relation → `sections` | optional — screen group; cleared if section deleted |
 | `name` | text | required — **version-group key** |
 | `width` | number | optional |
 | `height` | number | optional |
@@ -71,7 +84,7 @@ email for that relation.
 | `figma_url` | url | optional deep link |
 | `sort_order` | number | optional |
 
-### 3. `layers`
+### 4. `layers`
 
 | Field | Type | Notes |
 | --- | --- | --- |
@@ -83,7 +96,7 @@ email for that relation.
 | `clickable` | bool | overlay hit-testing (plugin sets `true`) |
 | `sort_order` | number | z-order within siblings |
 
-### 4. `layer_details` — 1:1 with `layers`
+### 5. `layer_details` — 1:1 with `layers`
 
 | Field | Type | Notes |
 | --- | --- | --- |
@@ -105,7 +118,7 @@ Token/style refs (optional, resolved at publish time):
 
 `backgroundColorToken` / `borderColorToken` / `effectStyle` live under `styles`; `textStyle` / `colorToken` live under `typography`.
 
-### 5. `foundations` — 1:1 with `users` (shared across all projects)
+### 6. `foundations` — 1:1 with `users` (shared across all projects)
 
 | Field | Type | Notes |
 | --- | --- | --- |
@@ -123,13 +136,20 @@ project reads the same foundations.
 
 ## Versioning model (no versions table)
 
-1. Each sync of a screen creates a **new `frames` row** with the same `name`.
+1. Each sync of a screen creates a **new `frames` row** with the same `name`,
+   unless `content_hash` matches the latest version (unchanged → skipped).
 2. All rows sharing `project` + `name` are versions of one screen.
 3. Sort by `-updated,-created` — index 0 is **Latest**.
 4. The frame-list page shows every row (duplicate names = version cards).
 5. The frame switcher dedupes by `name` (keeps latest per name).
 6. Deleting a version deletes only that `frames` row; `layers` and
    `layer_details` cascade automatically.
+7. `frames.content_hash` stores a fingerprint of the PNG + layer tree so the
+   plugin can skip duplicate versions on republish.
+8. `frames.section` is optional. Assigning a screen to a section in the
+   dashboard updates **all versions** with that `project` + `name`. On
+   republish, the plugin copies `section` from the previous latest version.
+9. Deleting a section clears `frames.section` (frames are not deleted).
 
 ---
 
@@ -147,6 +167,7 @@ frontend reads the PocketBase fields directly.
 | `frameDetail.imageUrl` (http) | `frames.image_url` | `Frame.image_url` |
 | `frameDetail.imageUrl` (data:) | `frames.thumbnail` (file) | `Frame.thumbnail` |
 | `frame` → parent screen | `frames.project` | `Frame.project` |
+| `frame` → optional group | `frames.section` | `Frame.section` |
 | `layer` → owning frame | `layers.frame` | `Layer.frame` |
 | `layer.parentId` | `layers.parent` | `Layer.parent` |
 | `layerDetail` → `layers.id` | `layer_details.layer` | `LayerDetail.layer` |
@@ -247,6 +268,7 @@ All authenticated users can **list/view** every record. Mutations require
 | Collection | List / View | Create / Update / Delete |
 | --- | --- | --- |
 | `projects` | any authed user | super only (create also requires `owner = @request.auth.id`) |
+| `sections` | any authed user | super only |
 | `frames` | any authed user | super only |
 | `layers` | any authed user | super only |
 | `layer_details` | any authed user | super only |
@@ -274,12 +296,15 @@ docker compose up -d --build
 `1785666300_foundations_v2_catalog.js` updates foundations field help and clears
 non-v2 `data` blobs (re-sync from Figma afterward).
 
+`1785666600_enable_batch_api.js` enables `POST /api/batch` (maxRequests 50,
+timeout 30s) so the plugin can chunk layer / layer_detail creates.
+
 **Option B — Admin UI import (fresh PocketBase):**
 
 1. Open Admin → **Settings → Import collections**
 2. Upload [`schema.json`](schema.json) (same contents as `pb_collections_import.json`)
 3. Leave **Delete missing collections** unchecked (keeps the built-in `users` collection and merges fields)
-4. Confirm — this adds `projects` / `frames` / `layers` / `layer_details` / `foundations` **and** the `users.role` field (`super` | `developer`)
+4. Confirm — this adds `projects` / `sections` / `frames` / `layers` / `layer_details` / `foundations` **and** the `users.role` field (`super` | `developer`)
 
 Then create login users as needed:
 

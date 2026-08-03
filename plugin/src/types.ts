@@ -134,12 +134,25 @@ export type UploadStatus =
   | "complete"
   | "error"
 
+/** A newly published frame with a shareable viewer URL. */
+export interface UploadedFrameLink {
+  id: string
+  name: string
+  /** Absolute URL teammates can open, e.g. https://host/frame/{id}?projectId=… */
+  url: string
+}
+
 export interface UploadProgress {
   current: number
   total: number
   currentItemName: string
   status: UploadStatus
   apiCallCount?: number
+  /** Frames that received a new version (with copyable share links). */
+  uploadedFrames?: UploadedFrameLink[]
+  /** Frame names skipped because nothing changed vs the latest version. */
+  skippedFrames?: string[]
+  error?: string
 }
 
 // --- Foundational export ---

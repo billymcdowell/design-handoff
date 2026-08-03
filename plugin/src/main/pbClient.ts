@@ -6,10 +6,38 @@
 
 import { API_BASE } from "../constants"
 import {
+  buildBatchMultipartBody,
   buildMultipartBody,
   MultipartField,
+  MultipartFile,
   randomBoundary,
 } from "./multipart"
+
+/** Matches PocketBase Dashboard batch.maxRequests (migration 1785666600). */
+export const BATCH_MAX_REQUESTS = 50
+
+/** Concurrent individual frame PNG creates (images stay out of /api/batch). */
+export const FRAME_UPLOAD_CONCURRENCY = 6
+
+const PB_ID_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789"
+
+/** PocketBase default id: 15 lowercase alphanumeric characters. */
+export function generateRecordId(): string {
+  let id = ""
+  for (let i = 0; i < 15; i++) {
+    id += PB_ID_CHARS[Math.floor(Math.random() * PB_ID_CHARS.length)]
+  }
+  return id
+}
+
+export function chunkArray<T>(items: T[], size: number): T[][] {
+  if (size <= 0) return [items]
+  const chunks: T[][] = []
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size))
+  }
+  return chunks
+}
 
 export interface PBRecord {
   id: string
@@ -241,6 +269,32 @@ export interface FrameFields {
   figma_url?: string
   image_url?: string
   sort_order?: number
+  /** Optional project section id — copied from the previous version on republish. */
+  section?: string
+  /** Fingerprint used to skip unchanged republishes. */
+  content_hash?: string
+}
+
+function escapeFilterValue(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
+}
+
+/** Latest version of a screen (same project + name), or null if never published. */
+export async function getLatestFrameByName(
+  token: string,
+  projectId: string,
+  name: string,
+): Promise<PBRecord | null> {
+  const filter = encodeURIComponent(
+    `project = "${escapeFilterValue(projectId)}" && name = "${escapeFilterValue(name)}"`,
+  )
+  const res = await fetch(
+    recordsUrl("frames", undefined, `perPage=1&sort=-updated,-created&filter=${filter}`),
+    { headers: { ...authHeaders(token), "Content-Type": "application/json" } },
+  )
+  if (!res.ok) return null
+  const data = (await res.json()) as PBListResponse<PBRecord>
+  return data.items[0] ?? null
 }
 
 /** Create a frames row. If `image` bytes are supplied, attach them to the
@@ -282,8 +336,122 @@ export async function createFrameRecord(
   return (await res.json()) as PBRecord
 }
 
+// ─── Batch API ──────────────────────────────────────────────────────────────
+export interface BatchRequest {
+  method: "POST" | "PATCH" | "PUT" | "DELETE"
+  url: string
+  body?: Record<string, unknown>
+  headers?: Record<string, string>
+}
+
+/** File attached to batch request index N as `requests.N.fieldName`. */
+export interface BatchFileAttachment {
+  requestIndex: number
+  fieldName: string
+  fileName: string
+  contentType: string
+  bytes: Uint8Array
+}
+
+export interface BatchResultItem {
+  status: number
+  body: unknown
+}
+
+/**
+ * `POST /api/batch` — JSON by default; multipart when `files` are supplied
+ * (`@jsonPayload` + `requests.N.fieldName`). Batch must be enabled server-side.
+ */
+export async function sendBatch(
+  token: string,
+  requests: BatchRequest[],
+  files?: BatchFileAttachment[],
+): Promise<BatchResultItem[]> {
+  if (requests.length === 0) return []
+  if (requests.length > BATCH_MAX_REQUESTS) {
+    throw new Error(
+      `Batch size ${requests.length} exceeds max ${BATCH_MAX_REQUESTS}`,
+    )
+  }
+
+  const payload = { requests }
+  const url = `${API_BASE}/api/batch`
+
+  let res: Response
+  if (files && files.length > 0) {
+    const boundary = randomBoundary()
+    const multipartFiles: MultipartFile[] = files.map((f) => ({
+      name: `requests.${f.requestIndex}.${f.fieldName}`,
+      fileName: f.fileName,
+      contentType: f.contentType,
+      bytes: f.bytes,
+    }))
+    const body = buildBatchMultipartBody(
+      boundary,
+      JSON.stringify(payload),
+      multipartFiles,
+    )
+    res = await fetch(url, {
+      method: "POST",
+      headers: {
+        ...authHeaders(token),
+        "Content-Type": `multipart/form-data; boundary=${boundary}`,
+      },
+      body: body as unknown as BodyInit,
+    })
+  } else {
+    res = await fetch(url, {
+      method: "POST",
+      headers: {
+        ...authHeaders(token),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    })
+  }
+
+  if (!res.ok) {
+    throw new Error(await pbErrorMessage(res))
+  }
+  return (await res.json()) as BatchResultItem[]
+}
+
+/** Create many records via `/api/batch`, chunked to BATCH_MAX_REQUESTS. */
+export async function createRecordsInBatches(
+  token: string,
+  collection: string,
+  records: Array<Record<string, unknown>>,
+): Promise<PBRecord[]> {
+  const created: PBRecord[] = []
+  for (const chunk of chunkArray(records, BATCH_MAX_REQUESTS)) {
+    const requests: BatchRequest[] = chunk.map((body) => ({
+      method: "POST",
+      url: `/api/collections/${collection}/records`,
+      body,
+    }))
+    const results = await sendBatch(token, requests)
+    for (let i = 0; i < results.length; i++) {
+      const item = results[i]
+      if (item.status < 200 || item.status >= 300) {
+        const msg =
+          item.body &&
+          typeof item.body === "object" &&
+          "message" in item.body &&
+          typeof (item.body as { message: unknown }).message === "string"
+            ? (item.body as { message: string }).message
+            : `HTTP ${item.status}`
+        throw new Error(`Batch create ${collection}[${i}] failed: ${msg}`)
+      }
+      created.push(item.body as PBRecord)
+    }
+  }
+  return created
+}
+
 // ─── Layers ─────────────────────────────────────────────────────────────────
 export interface LayerFields {
+  /** Optional client-pregenerated PocketBase id (for batch parent refs). */
+  id?: string
   frame: string
   parent?: string
   name: string
@@ -305,6 +473,7 @@ export async function createLayerRecord(
 
 // ─── Layer details ───────────────────────────────────────────────────────────
 export interface LayerDetailFields {
+  id?: string
   layer: string
   layout: unknown
   styles: unknown

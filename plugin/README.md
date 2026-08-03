@@ -69,9 +69,14 @@ pick `manifest.json`.
 - `npm run typecheck` — type-check without emitting.
 
 `VITE_API_URL` defaults to `http://localhost:8090` (matches local PocketBase).
-Local access is declared in `manifest.json → networkAccess.devAllowedDomains`
+Optional `VITE_APP_URL` sets the origin used for post-publish share links
+(defaults to `VITE_API_URL`). Local access is declared in
+`manifest.json → networkAccess.devAllowedDomains`
 (Figma rejects `127.0.0.1` — use `localhost` only). When pointing at a
 non-local host, add its origin to `networkAccess.allowedDomains`.
+
+After a successful publish, the plugin lists a copyable viewer URL for each
+new frame version (`/frame/{id}?projectId=…`) so you can paste them to teammates.
 
 ## Notes / parity caveats
 

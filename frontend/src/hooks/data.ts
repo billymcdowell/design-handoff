@@ -3,6 +3,7 @@ import {
   getUserProjects,
   getUserProjectById,
   getProjectFrames,
+  getProjectSections,
   getFrame,
   getLayersByFrame,
   getFramesByName,
@@ -12,7 +13,7 @@ import {
   getUserFoundations,
 } from "@/lib/api"
 import { sortFramesByDateDesc, dedupeLatestFrames } from "@/lib/frame-utils"
-import type { Foundation, Frame, Layer, LayerDetail, Project } from "@/lib/types"
+import type { Foundation, Frame, Layer, LayerDetail, Project, Section } from "@/lib/types"
 
 export interface AsyncState<T> {
   data: T | undefined
@@ -120,6 +121,14 @@ export function useLatestFramesByProject(projectId?: string) {
     async () => dedupeLatestFrames(await getProjectFrames(projectId!)),
     `frames-latest:${projectId}`,
     !!projectId
+  )
+}
+
+export function useProjectSections(projectId?: string) {
+  return useAsync<Section[]>(
+    () => getProjectSections(projectId!),
+    `sections:${projectId}`,
+    !!projectId,
   )
 }
 

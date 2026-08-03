@@ -20,3 +20,9 @@ export const PLACEHOLDER_THUMBNAIL = "/placeholder.svg?height=200&width=375"
 // Base URL of the stock PocketBase instance. Injected at build time.
 export const API_BASE: string =
   import.meta.env.VITE_API_URL || "http://localhost:8090"
+
+// Origin of the web app (SPA is usually served from the same host as PocketBase).
+// Override with VITE_APP_URL only when the frontend lives on a different origin.
+export const APP_ORIGIN: string = (
+  import.meta.env.VITE_APP_URL || API_BASE
+).replace(/\/$/, "")

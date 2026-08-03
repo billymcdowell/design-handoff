@@ -14,6 +14,7 @@ export async function listFrames(projectId: string) {
     frames: frames.map((f) => ({
       id: f.id,
       name: f.name,
+      section: f.section || null,
       width: f.width,
       height: f.height,
       updated: f.updated,

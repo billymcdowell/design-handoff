@@ -235,6 +235,8 @@ figma.ui.onmessage = async (msg: Msg) => {
         success: result.success,
         error: result.error,
         apiCallCount: result.apiCallCount,
+        uploadedFrames: result.uploadedFrames,
+        skippedFrames: result.skippedFrames,
       })
       break
     }

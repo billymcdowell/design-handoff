@@ -65,3 +65,20 @@ export function buildMultipartBody(
   }
   return body
 }
+
+/**
+ * PocketBase `/api/batch` multipart shape:
+ * - `@jsonPayload` — serialized `{ requests: [...] }`
+ * - `requests.N.fileField` — file parts keyed by request index
+ */
+export function buildBatchMultipartBody(
+  boundary: string,
+  jsonPayload: string,
+  files: MultipartFile[],
+): Uint8Array {
+  return buildMultipartBody(
+    boundary,
+    [{ name: "@jsonPayload", value: jsonPayload }],
+    files,
+  )
+}

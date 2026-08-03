@@ -2,7 +2,7 @@ import { pb } from "../pocketbase"
 import { resolveOwnerUserId } from "../auth"
 import { framesByNameFilter, projectFilter, escapeFilterValue } from "../pb-filter"
 import { removeFoundationSourceFromData } from "@/features/foundations/catalog"
-import type { Foundation, FoundationsData, Frame, Layer, LayerDetail, Project } from "../types"
+import type { Foundation, FoundationsData, Frame, Layer, LayerDetail, Project, Section } from "../types"
 
 // ─── Projects ───────────────────────────────────────────────
 /** All projects visible to the signed-in user (admins + developers). */
@@ -59,8 +59,48 @@ export async function deleteUserProject(id: string): Promise<boolean> {
   }
 }
 
+// ─── Sections ───────────────────────────────────────────────
+export async function getProjectSections(projectId: string): Promise<Section[]> {
+  return pb.collection("sections").getFullList<Section>({
+    filter: projectFilter(projectId),
+    sort: "sort_order,name",
+  })
+}
+
+export async function createSection(data: {
+  project: string
+  name: string
+  sort_order?: number
+}): Promise<Section> {
+  return pb.collection("sections").create<Section>({
+    project: data.project,
+    name: data.name,
+    sort_order: data.sort_order ?? 0,
+  })
+}
+
+export async function updateSection(data: {
+  id: string
+  name?: string
+  sort_order?: number
+}): Promise<Section> {
+  return pb.collection("sections").update<Section>(data.id, {
+    name: data.name,
+    sort_order: data.sort_order,
+  })
+}
+
+export async function deleteSection(id: string): Promise<boolean> {
+  try {
+    await pb.collection("sections").delete(id)
+    return true
+  } catch {
+    return false
+  }
+}
+
 // ─── Frames ─────────────────────────────────────────────────
-const frameExpand = "project.owner"
+const frameExpand = "project.owner,section"
 
 export async function getFrame(frameId: string): Promise<Frame | null> {
   try {
@@ -91,11 +131,49 @@ export async function updateFrame(data: {
   id: string
   name?: string
   figma_url?: string
+  section?: string | null
 }): Promise<Frame> {
   return pb.collection("frames").update<Frame>(data.id, {
     name: data.name,
     figma_url: data.figma_url,
+    ...(data.section !== undefined ? { section: data.section || "" } : {}),
   })
+}
+
+/** Assign every version of a screen (project + name) to a section (or clear it). */
+export async function setScreenSection(
+  projectId: string,
+  frameName: string,
+  sectionId: string | null,
+): Promise<void> {
+  const versions = await getFramesByName(projectId, frameName)
+  await Promise.all(
+    versions.map((frame) =>
+      pb.collection("frames").update(frame.id, { section: sectionId || "" }),
+    ),
+  )
+}
+
+/** Move multiple screens (by name) into a section. Dedupes names. */
+export async function setScreensSection(
+  projectId: string,
+  frameNames: string[],
+  sectionId: string | null,
+): Promise<void> {
+  const unique = new Set(frameNames.filter(Boolean))
+  if (unique.size === 0) return
+  const all = await getProjectFrames(projectId)
+  const toUpdate = all.filter((frame) => unique.has(frame.name))
+  // Sequential batches avoid PocketBase autocancel races on many parallel writes.
+  const chunkSize = 8
+  for (let i = 0; i < toUpdate.length; i += chunkSize) {
+    const chunk = toUpdate.slice(i, i + chunkSize)
+    await Promise.all(
+      chunk.map((frame) =>
+        pb.collection("frames").update(frame.id, { section: sectionId || "" }),
+      ),
+    )
+  }
 }
 
 export async function deleteFrame(id: string): Promise<boolean> {

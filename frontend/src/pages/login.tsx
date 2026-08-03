@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { useNavigate } from "react-router"
+import { useNavigate, useSearchParams } from "react-router"
 import { Loader2 } from "lucide-react"
 import { signInWithPassword } from "@/lib/auth"
 import { toast } from "@/lib/toast"
@@ -8,11 +8,21 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 
+function getPostLoginRedirect(redirect: string | null): string {
+  if (!redirect) return "/projects"
+  if (!redirect.startsWith("/") || redirect.startsWith("//")) return "/projects"
+  if (redirect.startsWith("/login") || redirect.startsWith("/logout")) return "/projects"
+  return redirect
+}
+
 export default function LoginPage() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [isLoading, setIsLoading] = useState(false)
+
+  const redirectTo = getPostLoginRedirect(searchParams.get("redirect"))
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -20,7 +30,7 @@ export default function LoginPage() {
     try {
       await signInWithPassword(email, password)
       toast.success("Welcome back")
-      navigate("/projects")
+      navigate(redirectTo, { replace: true })
     } catch {
       toast.error("Invalid email or password")
     } finally {

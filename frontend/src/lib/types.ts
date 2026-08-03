@@ -34,8 +34,20 @@ export interface Project extends RecordModel {
   }
 }
 
+/** Optional screen group within a project. */
+export interface Section extends RecordModel {
+  project: string
+  name: string
+  sort_order?: number
+  expand?: {
+    project?: Project
+  }
+}
+
 export interface Frame extends RecordModel {
   project: string
+  /** Optional section id — groups screens in the project view. */
+  section?: string
   name: string
   width?: number
   height?: number
@@ -47,6 +59,7 @@ export interface Frame extends RecordModel {
   sort_order?: number
   expand?: {
     project?: Project
+    section?: Section
   }
 }
 

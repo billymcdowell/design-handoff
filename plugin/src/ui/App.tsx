@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from "react"
 import type {
   BackendPayload,
   Project,
+  UploadedFrameLink,
   UploadProgress,
 } from "../types"
+import { copyToClipboard } from "./clipboard"
 
 // ── UI → Main helper ─────────────────────────────────────────────────────────
 function post(message: Record<string, unknown>) {
@@ -123,7 +125,9 @@ export function App() {
           currentItemName: "",
           status: success ? "complete" : "error",
           apiCallCount: msg.apiCallCount as number | undefined,
-          ...(success ? {} : { error: msg.error }),
+          uploadedFrames: msg.uploadedFrames as UploadedFrameLink[] | undefined,
+          skippedFrames: msg.skippedFrames as string[] | undefined,
+          ...(success ? {} : { error: msg.error as string | undefined }),
         }))
         break
       }
@@ -436,6 +440,7 @@ function ProgressView(props: {
   onDone: () => void
 }) {
   const { progress, startTime, onDone } = props
+  const [copiedKey, setCopiedKey] = useState<string | null>(null)
   const percent = Math.min(
     100,
     Math.round((progress.current / progress.total) * 100),
@@ -453,21 +458,88 @@ function ProgressView(props: {
       : `${seconds}s remaining`
   }
 
+  function copyText(key: string, text: string) {
+    // Keep this synchronous so the click gesture stays valid for execCommand.
+    const ok = copyToClipboard(text)
+    if (!ok) return
+    setCopiedKey(key)
+    window.setTimeout(() => {
+      setCopiedKey((current) => (current === key ? null : current))
+    }, 1500)
+  }
+
   if (progress.status === "complete") {
+    const uploaded = progress.uploadedFrames ?? []
+    const skipped = progress.skippedFrames ?? []
+    const allSkipped = uploaded.length === 0 && skipped.length > 0
+    const allLinksText = uploaded.map((f) => `${f.name}\n${f.url}`).join("\n\n")
+
     return (
       <div className="view center">
-        <div className="emoji">✅</div>
-        <h1>Published Successfully!</h1>
-        <p>Your design has been uploaded to Design Handoff.</p>
+        <div className="emoji">{allSkipped ? "↷" : "✅"}</div>
+        <h1>{allSkipped ? "Nothing New to Publish" : "Published Successfully!"}</h1>
+        <p>
+          {allSkipped
+            ? "Every selected frame matched the latest version — no new versions were created."
+            : "Your design has been uploaded to Design Handoff."}
+        </p>
         <div className="card" style={{ width: "100%" }}>
           <strong>Summary:</strong>
-          <span className="small">Total items processed: {progress.total}</span>
+          {uploaded.length > 0 && (
+            <span className="small">
+              Uploaded: {uploaded.length} frame
+              {uploaded.length === 1 ? "" : "s"}
+            </span>
+          )}
+          {skipped.length > 0 && (
+            <span className="small">
+              Skipped (no changes): {skipped.join(", ")}
+            </span>
+          )}
+          {uploaded.length === 0 && skipped.length === 0 && (
+            <span className="small">Total items processed: {progress.total}</span>
+          )}
           {progress.apiCallCount !== undefined && (
             <span className="small">
               Total API calls made: {progress.apiCallCount}
             </span>
           )}
         </div>
+        {uploaded.length > 0 && (
+          <div className="card share-card" style={{ width: "100%" }}>
+            <div className="row between">
+              <strong>Share links</strong>
+              {uploaded.length > 1 && (
+                <button
+                  type="button"
+                  className="linkbtn"
+                  onClick={() => copyText("all", allLinksText)}
+                >
+                  {copiedKey === "all" ? "Copied!" : "Copy all"}
+                </button>
+              )}
+            </div>
+            <ul className="share-list">
+              {uploaded.map((frame) => (
+                <li key={frame.id} className="share-item">
+                  <div className="share-meta">
+                    <span className="share-name">{frame.name}</span>
+                    <span className="share-url" title={frame.url}>
+                      {frame.url}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="share-copy"
+                    onClick={() => copyText(frame.id, frame.url)}
+                  >
+                    {copiedKey === frame.id ? "Copied!" : "Copy"}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         <button className="primary" onClick={onDone}>
           Done
         </button>
@@ -480,10 +552,7 @@ function ProgressView(props: {
       <div className="view center">
         <div className="emoji">❌</div>
         <h1>Upload Failed</h1>
-        <p className="error">
-          {(progress as UploadProgress & { error?: string }).error ||
-            "Something went wrong."}
-        </p>
+        <p className="error">{progress.error || "Something went wrong."}</p>
         <button className="primary" onClick={onDone}>
           Go Back
         </button>

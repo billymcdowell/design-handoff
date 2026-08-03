@@ -5,6 +5,7 @@ import {
   Check,
   Clock,
   Layers as LayersIcon,
+  Link2,
   Minus,
   Plus,
   Search,
@@ -31,6 +32,7 @@ import { deleteFrame, getLayerDetails } from "@/lib/api"
 import { frameImageSrc } from "@/lib/files"
 import { frameUploaderLabel } from "@/lib/frame-utils"
 import { copyToClipboard } from "@/lib/clipboard"
+import { copyShareLink, frameShareUrl } from "@/lib/share"
 import { toast } from "@/lib/toast"
 import { useIsMobile } from "@/hooks/use-mobile"
 import type { Frame, Layer } from "@/lib/types"
@@ -422,6 +424,14 @@ export default function FrameViewerPage({
         </div>
 
         <div className="ml-auto flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void copyShareLink(frameShareUrl(frameId, projectId))}
+          >
+            <Link2 className="size-4" />
+            Share
+          </Button>
           {frameVersions.length > 1 && (
             <Button variant="outline" size="sm" onClick={() => setShowVersionTimeline((v) => !v)}>
               <Clock className="size-4" />
