@@ -1,8 +1,8 @@
 // ─── Stock PocketBase REST client (main thread) ────────────────────────────
 // Everything goes through the standard records API:
 //   GET/POST/PATCH  ${API_BASE}/api/collections/{name}/records[/{id}]
-// Auth is the PocketBase (superuser) token in the `Authorization` header.
-// No custom endpoints, no X-API-Key — see backend/SCHEMA.md.
+// Auth is a PocketBase JWT in the `Authorization` header (from users
+// email/password login). No custom endpoints, no X-API-Key — see SCHEMA.md.
 
 import { API_BASE } from "../constants"
 import {
@@ -20,6 +20,10 @@ export const BATCH_MAX_REQUESTS = 50
 export const FRAME_UPLOAD_CONCURRENCY = 6
 
 const PB_ID_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789"
+const USERS_COLLECTION = "users"
+const SUPERUSERS_COLLECTION = "_superusers"
+/** PocketBase system collection id for `_superusers`. */
+const SUPERUSERS_COLLECTION_ID = "pbc_3142635823"
 
 /** PocketBase default id: 15 lowercase alphanumeric characters. */
 export function generateRecordId(): string {
@@ -70,6 +74,8 @@ export type TokenValidation =
       /** Auth collection name (`users` or `_superusers`). */
       collectionName: string
       email: string | null
+      /** JWT to store (from login or auth-refresh). */
+      token: string
     }
   | { ok: false; error: string }
 
@@ -82,6 +88,64 @@ function displayNameFromRecord(record: Record<string, unknown> | null): string {
   const username = record.username
   if (typeof username === "string" && username.trim()) return username.trim()
   return "User"
+}
+
+function isSuperuserCollection(name: string): boolean {
+  return name === SUPERUSERS_COLLECTION || name === SUPERUSERS_COLLECTION_ID
+}
+
+/**
+ * Plugin publish requires a designer `users` account (or Admin `_superusers`
+ * for rare ops). Developers are read-only and cannot publish.
+ */
+function assertCanPublish(
+  collectionName: string,
+  record: Record<string, unknown> | null,
+): string | null {
+  if (isSuperuserCollection(collectionName)) return null
+  const role = record && typeof record.role === "string" ? record.role : ""
+  if (role === "designer") return null
+  if (role === "developer") {
+    return "This account is a developer (read-only). Ask an admin to set your role to designer to publish."
+  }
+  return "Only designer accounts can publish from the plugin. Set role to designer in PocketBase Admin."
+}
+
+function authResultFromBody(
+  body: { token?: string; record?: Record<string, unknown> },
+  fallbackCollection: string,
+  fallbackToken?: string,
+): TokenValidation {
+  const record = body.record ?? null
+  const userId = record && typeof record.id === "string" ? record.id : ""
+  if (!userId) {
+    return { ok: false, error: "Auth record missing id" }
+  }
+  const email =
+    record && typeof record.email === "string" ? record.email : null
+  const recordCollection =
+    record && typeof record.collectionName === "string"
+      ? record.collectionName
+      : fallbackCollection
+  const roleError = assertCanPublish(recordCollection, record)
+  if (roleError) return { ok: false, error: roleError }
+
+  const nextToken =
+    typeof body.token === "string" && body.token
+      ? body.token
+      : fallbackToken
+  if (!nextToken) {
+    return { ok: false, error: "Auth response missing token" }
+  }
+
+  return {
+    ok: true,
+    displayName: displayNameFromRecord(record),
+    userId,
+    collectionName: recordCollection,
+    email,
+    token: nextToken,
+  }
 }
 
 /** Best-effort collection id/name from a PocketBase JWT payload. */
@@ -104,17 +168,54 @@ function collectionHintFromJwt(token: string): string | null {
 }
 
 /**
+ * Sign in with a dashboard `users` email/password.
+ * Requires role `designer` to publish from the plugin.
+ */
+export async function authWithPassword(
+  email: string,
+  password: string,
+): Promise<TokenValidation> {
+  try {
+    const res = await fetch(
+      `${API_BASE}/api/collections/${encodeURIComponent(USERS_COLLECTION)}/auth-with-password`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ identity: email, password }),
+      },
+    )
+    if (!res.ok) {
+      if (res.status === 400 || res.status === 401 || res.status === 403) {
+        return { ok: false, error: "Invalid email or password." }
+      }
+      return { ok: false, error: await pbErrorMessage(res) }
+    }
+    const body = (await res.json()) as {
+      token?: string
+      record?: Record<string, unknown>
+    }
+    return authResultFromBody(body, USERS_COLLECTION)
+  } catch (err) {
+    const networkError = err instanceof Error ? err.message : String(err)
+    return {
+      ok: false,
+      error: `Cannot reach PocketBase at ${API_BASE}. Is it running? (${networkError})`,
+    }
+  }
+}
+
+/**
  * Verify a PocketBase auth token via auth-refresh (the documented way to
  * validate tokens — list endpoints return 200 for guests/invalid tokens).
  * Runs on the main thread so Figma's sandbox fetch is used (no iframe CORS).
- * On success, returns a display name from the auth record (name/email).
+ * On success, returns a display name and (possibly refreshed) token.
  */
 export async function validateAuthToken(token: string): Promise<TokenValidation> {
   const hint = collectionHintFromJwt(token)
   const collections = [
     ...(hint ? [hint] : []),
-    "_superusers",
-    "users",
+    USERS_COLLECTION,
+    SUPERUSERS_COLLECTION,
   ].filter((c, i, arr) => arr.indexOf(c) === i)
 
   let sawUnauthorized = false
@@ -134,28 +235,10 @@ export async function validateAuthToken(token: string): Promise<TokenValidation>
       )
       if (res.ok) {
         const body = (await res.json()) as {
+          token?: string
           record?: Record<string, unknown>
         }
-        const record = body.record ?? null
-        const userId =
-          record && typeof record.id === "string" ? record.id : ""
-        if (!userId) {
-          return { ok: false, error: "Auth record missing id" }
-        }
-        const email =
-          record && typeof record.email === "string" ? record.email : null
-        // Prefer JWT/auth-refresh collection name; fall back to the path we hit.
-        const recordCollection =
-          record && typeof record.collectionName === "string"
-            ? record.collectionName
-            : collection
-        return {
-          ok: true,
-          displayName: displayNameFromRecord(record),
-          userId,
-          collectionName: recordCollection,
-          email,
-        }
+        return authResultFromBody(body, collection, token)
       }
       if (res.status === 401 || res.status === 403) {
         sawUnauthorized = true
@@ -179,12 +262,12 @@ export async function validateAuthToken(token: string): Promise<TokenValidation>
     return {
       ok: false,
       error:
-        "Invalid or expired token. In PocketBase Admin, open Collections → _superusers → your account → Impersonate, copy the token, and paste it here.",
+        "Session expired. Sign in again with your designer email and password.",
     }
   }
   return {
     ok: false,
-    error: `Could not validate token against PocketBase at ${API_BASE}.`,
+    error: `Could not validate session against PocketBase at ${API_BASE}.`,
   }
 }
 
@@ -233,7 +316,7 @@ export async function listProjectRecords(token: string): Promise<PBRecord[]> {
     { headers: { ...authHeaders(token), "Content-Type": "application/json" } },
   )
   if (res.status === 401 || res.status === 403) {
-    const err = new Error("API key is invalid. Please log in again.") as Error & {
+    const err = new Error("Session expired. Please log in again.") as Error & {
       unauthorized?: boolean
     }
     err.unauthorized = true
@@ -498,20 +581,16 @@ export interface FoundationFields {
 
 /**
  * `foundations.owner` is a relation to the `users` collection.
- * Superuser impersonate tokens authenticate against `_superusers`, whose ids are
- * not valid relation targets — map them to a real `users` id before upserting.
+ * Designer tokens already use a `users` id. Admin `_superusers` tokens are
+ * mapped to a real `users` id (email match, else an existing project owner).
  */
 export async function resolveFoundationOwnerId(
   token: string,
   auth: Extract<TokenValidation, { ok: true }>,
 ): Promise<string> {
-  const isSuperuser =
-    auth.collectionName === "_superusers" ||
-    auth.collectionName === "pbc_3142635823" // PocketBase system collection id
+  if (!isSuperuserCollection(auth.collectionName)) return auth.userId
 
-  if (!isSuperuser) return auth.userId
-
-  // 1. Prefer a `users` row with the same email as the superuser.
+  // 1. Prefer a `users` row with the same email as the Admin.
   if (auth.email) {
     const filter = encodeURIComponent(`email = "${auth.email.replace(/"/g, '\\"')}"`)
     const res = await fetch(
@@ -525,8 +604,7 @@ export async function resolveFoundationOwnerId(
     }
   }
 
-  // 2. Fall back to the owner of the most recently updated project (superusers
-  //    can list all projects; dashboard users own those rows).
+  // 2. Fall back to the owner of an existing project.
   const projects = await listProjectRecords(token)
   for (const project of projects) {
     const owner = project.owner
@@ -534,10 +612,8 @@ export async function resolveFoundationOwnerId(
   }
 
   throw new Error(
-    "Superuser tokens cannot own foundations. Create a dashboard user " +
-      "(Collections → users), or create a project while logged into the " +
-      "dashboard, then retry. Or paste a users auth token instead of a " +
-      "superuser impersonate token.",
+    "Admin sessions cannot own foundations directly. Create a designer " +
+      "user (Collections → users, role designer) and sign in with that account.",
   )
 }
 

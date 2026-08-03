@@ -37,9 +37,9 @@ If you already have a `.env` with `PB_SUPERUSER_EMAIL` / `PB_SUPERUSER_PASSWORD`
 
 Then:
 
-1. Admin → **Collections → `users` → New record** — create a login user (email/password). Set **role** to `super` for designers who publish, or `developer` for read-only. There is no public signup.
-2. Sign in to the app with that user.
-3. Point the Figma plugin at your server (see below).
+1. Admin → **Collections → `users` → New record** — create a login user (email/password). Set **role** to `designer` for people who publish, or `developer` for read-only. There is no public signup.
+2. Sign in to the app with that user (designers can manage; developers view).
+3. Point the Figma plugin at your server — designers sign in with the same email/password (see below).
 
 On first start the container runs `pocketbase migrate up`, which creates all collections (`projects`, `sections`, `frames`, `layers`, `layer_details`, `foundations`, plus the `users.role` field). Rebuild after schema/migration changes so Docker picks them up:
 
@@ -108,7 +108,7 @@ npm run build
 
 In Figma Desktop: **Plugins → Development → Import plugin from manifest…** → select `plugin/manifest.json`.
 
-Auth: paste a PocketBase auth token (Admin → `_superusers` → Impersonate, or a `users` token for owner-scoped access). Details in [`plugin/README.md`](plugin/README.md).
+Auth: sign in with a `users` account that has **role `designer`** (same email/password as the web app). Details in [`plugin/README.md`](plugin/README.md).
 
 ---
 

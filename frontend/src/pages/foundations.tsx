@@ -34,7 +34,7 @@ function canEditFoundations(): boolean {
   const record = pb.authStore.record as User | null
   if (!record) return false
   if (isPocketBaseSuperuser(record)) return true
-  return record.role === "super"
+  return record.role === "designer"
 }
 
 function formatChangeValue(value: unknown): string {

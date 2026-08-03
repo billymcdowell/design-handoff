@@ -13,6 +13,7 @@ import {
 } from "./foundational"
 import { fetchProjectsFromApi, resolveProjectForPublish } from "./planLimits"
 import {
+  authWithPassword,
   findFoundationRecord,
   resolveFoundationOwnerId,
   upsertFoundationRecord,
@@ -56,9 +57,13 @@ figma.ui.onmessage = async (msg: Msg) => {
           })
           break
         }
+        // Persist refreshed JWT when PocketBase rotates it.
+        if (check.token !== token) {
+          await figma.clientStorage.setAsync(STORAGE_KEY_TOKEN, check.token)
+        }
         figma.ui.postMessage({
           type: "AUTH_RESULT",
-          token,
+          token: check.token,
           displayName: check.displayName,
           userId: check.userId,
         })
@@ -76,11 +81,11 @@ figma.ui.onmessage = async (msg: Msg) => {
 
     case "LOGIN": {
       // Validate on the main thread (sandbox fetch — no iframe CORS; matches
-      // networkAccess). UI-thread validation previously pointed at 127.0.0.1
-      // (blocked by Figma) and used a list endpoint that returns 200 for guests.
-      const token = msg.token as string
+      // networkAccess).
+      const email = String(msg.email ?? "").trim()
+      const password = String(msg.password ?? "")
       try {
-        const check = await validateAuthToken(token)
+        const check = await authWithPassword(email, password)
         if (!check.ok) {
           figma.ui.postMessage({
             type: "AUTH_RESULT",
@@ -89,12 +94,12 @@ figma.ui.onmessage = async (msg: Msg) => {
           })
           break
         }
-        await figma.clientStorage.setAsync(STORAGE_KEY_TOKEN, token)
+        await figma.clientStorage.setAsync(STORAGE_KEY_TOKEN, check.token)
         const saved = await figma.clientStorage.getAsync(STORAGE_KEY_TOKEN)
-        if (saved === token) {
+        if (saved === check.token) {
           figma.ui.postMessage({
             type: "AUTH_RESULT",
-            token,
+            token: check.token,
             displayName: check.displayName,
             userId: check.userId,
           })
@@ -103,7 +108,7 @@ figma.ui.onmessage = async (msg: Msg) => {
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
-        figma.notify(`❌ Failed to save API key: ${message}`)
+        figma.notify(`❌ Failed to sign in: ${message}`)
         await figma.clientStorage.setAsync(STORAGE_KEY_TOKEN, null)
         figma.ui.postMessage({
           type: "AUTH_RESULT",
@@ -126,7 +131,7 @@ figma.ui.onmessage = async (msg: Msg) => {
         const token =
           (msg.token as string) ||
           (await figma.clientStorage.getAsync(STORAGE_KEY_TOKEN))
-        if (!token) throw new Error("No API key found. Please log in again.")
+        if (!token) throw new Error("Not signed in. Please log in again.")
 
         const projects = await fetchProjectsFromApi(token)
         figma.ui.postMessage({ type: "PROJECTS_LOADED", projects })
@@ -287,10 +292,14 @@ figma.ui.onmessage = async (msg: Msg) => {
           })
           return
         }
+        if (check.token !== token) {
+          await figma.clientStorage.setAsync(STORAGE_KEY_TOKEN, check.token)
+        }
+        const authToken = check.token
 
-        const ownerId = await resolveFoundationOwnerId(token, check)
+        const ownerId = await resolveFoundationOwnerId(authToken, check)
         const { fileKey, fileName } = getFoundationFileIdentity()
-        const existing = await findFoundationRecord(token, ownerId)
+        const existing = await findFoundationRecord(authToken, ownerId)
         const existingData = existing?.data ?? null
 
         const { data: synced, historyEntry } = syncFoundationsData(
@@ -304,7 +313,7 @@ figma.ui.onmessage = async (msg: Msg) => {
         )
 
         const counts = countCatalogTokens(synced.catalog)
-        await upsertFoundationRecord(token, {
+        await upsertFoundationRecord(authToken, {
           owner: ownerId,
           data: synced,
           variables_count: counts.variables_count,

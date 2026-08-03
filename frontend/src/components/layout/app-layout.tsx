@@ -6,6 +6,7 @@ import { AppSidebar } from "./app-sidebar"
 import { ModeToggle } from "./mode-toggle"
 import { CommandPalette } from "@/components/command-palette"
 import { useProjects, type AsyncState } from "@/hooks/data"
+import { useAuth } from "@/providers/auth-provider"
 import type { Project } from "@/lib/types"
 
 export type AppLayoutContext = AsyncState<Project[]>
@@ -13,6 +14,7 @@ export type AppLayoutContext = AsyncState<Project[]>
 export function AppLayout() {
   const projectsState = useProjects()
   const projects = projectsState.data ?? []
+  const { user, role } = useAuth()
 
   return (
     <SidebarProvider>
@@ -21,8 +23,16 @@ export function AppLayout() {
         <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
           <SidebarTrigger className="-ml-1" />
           <Separator orientation="vertical" className="mr-2 h-4" />
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex items-center gap-3">
             <ModeToggle />
+            {user && (
+              <div className="min-w-0 text-right text-sm leading-tight">
+                <div className="max-w-[12rem] truncate font-medium sm:max-w-[16rem]">
+                  {user.email}
+                </div>
+                <div className="text-muted-foreground capitalize">{role}</div>
+              </div>
+            )}
             <Button variant="ghost" size="sm" render={<Link to="/logout" />}>
               Logout
             </Button>

@@ -125,7 +125,7 @@
         "type": "select",
         "maxSelect": 1,
         "values": [
-          "super",
+          "designer",
           "developer"
         ]
       },
@@ -225,9 +225,9 @@
     "system": false,
     "listRule": "@request.auth.id != \"\"",
     "viewRule": "@request.auth.id != \"\"",
-    "createRule": "@request.auth.role = \"super\" && @request.body.owner = @request.auth.id",
-    "updateRule": "@request.auth.role = \"super\"",
-    "deleteRule": "@request.auth.role = \"super\"",
+    "createRule": "@request.auth.role = \"designer\" && @request.body.owner = @request.auth.id",
+    "updateRule": "@request.auth.role = \"designer\"",
+    "deleteRule": "@request.auth.role = \"designer\"",
     "fields": [
       {
         "autogeneratePattern": "[a-z0-9]{15}",
@@ -364,9 +364,9 @@
     "system": false,
     "listRule": "@request.auth.id != \"\"",
     "viewRule": "@request.auth.id != \"\"",
-    "createRule": "@request.auth.role = \"super\"",
-    "updateRule": "@request.auth.role = \"super\"",
-    "deleteRule": "@request.auth.role = \"super\"",
+    "createRule": "@request.auth.role = \"designer\"",
+    "updateRule": "@request.auth.role = \"designer\"",
+    "deleteRule": "@request.auth.role = \"designer\"",
     "fields": [
       {
         "autogeneratePattern": "[a-z0-9]{15}",
@@ -458,9 +458,9 @@
     "system": false,
     "listRule": "@request.auth.id != \"\"",
     "viewRule": "@request.auth.id != \"\"",
-    "createRule": "@request.auth.role = \"super\"",
-    "updateRule": "@request.auth.role = \"super\"",
-    "deleteRule": "@request.auth.role = \"super\"",
+    "createRule": "@request.auth.role = \"designer\"",
+    "updateRule": "@request.auth.role = \"designer\"",
+    "deleteRule": "@request.auth.role = \"designer\"",
     "fields": [
       {
         "autogeneratePattern": "[a-z0-9]{15}",
@@ -687,9 +687,9 @@
     "system": false,
     "listRule": "@request.auth.id != \"\"",
     "viewRule": "@request.auth.id != \"\"",
-    "createRule": "@request.auth.role = \"super\"",
-    "updateRule": "@request.auth.role = \"super\"",
-    "deleteRule": "@request.auth.role = \"super\"",
+    "createRule": "@request.auth.role = \"designer\"",
+    "updateRule": "@request.auth.role = \"designer\"",
+    "deleteRule": "@request.auth.role = \"designer\"",
     "fields": [
       {
         "autogeneratePattern": "[a-z0-9]{15}",
@@ -907,9 +907,9 @@
     "system": false,
     "listRule": "@request.auth.id != \"\"",
     "viewRule": "@request.auth.id != \"\"",
-    "createRule": "@request.auth.role = \"super\"",
-    "updateRule": "@request.auth.role = \"super\"",
-    "deleteRule": "@request.auth.role = \"super\"",
+    "createRule": "@request.auth.role = \"designer\"",
+    "updateRule": "@request.auth.role = \"designer\"",
+    "deleteRule": "@request.auth.role = \"designer\"",
     "fields": [
       {
         "autogeneratePattern": "[a-z0-9]{15}",
@@ -1016,9 +1016,9 @@
     "system": false,
     "listRule": "@request.auth.id != \"\"",
     "viewRule": "@request.auth.id != \"\"",
-    "createRule": "@request.auth.role = \"super\" && @request.body.owner = @request.auth.id",
-    "updateRule": "@request.auth.role = \"super\" && owner = @request.auth.id",
-    "deleteRule": "@request.auth.role = \"super\" && owner = @request.auth.id",
+    "createRule": "@request.auth.role = \"designer\" && @request.body.owner = @request.auth.id",
+    "updateRule": "@request.auth.role = \"designer\" && owner = @request.auth.id",
+    "deleteRule": "@request.auth.role = \"designer\" && owner = @request.auth.id",
     "fields": [
       {
         "autogeneratePattern": "[a-z0-9]{15}",

@@ -27,7 +27,7 @@ export function authCollectionName(
 
 /**
  * Sign in with PocketBase Admin credentials first, then fall back to a
- * dashboard `users` account (developers).
+ * dashboard `users` account (designers / developers).
  */
 export async function signInWithPassword(email: string, password: string) {
   try {

@@ -25,7 +25,8 @@ export function App() {
   const [projects, setProjects] = useState<Project[]>([])
   const [selectedProjectId, setSelectedProjectId] = useState("")
   const [loadingProjects, setLoadingProjects] = useState(false)
-  const [inputToken, setInputToken] = useState("")
+  const [email, setEmail] = useState("")
+  const [password, setPassword] = useState("")
   const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(
     null,
   )
@@ -68,14 +69,14 @@ export function App() {
           setDisplayName((msg.displayName as string | undefined) || "User")
           setLoading(false)
           setAuthError(null)
-          setInputToken("")
+          setPassword("")
           setLoadingProjects(true)
           setTimeout(() => post({ type: "FETCH_PROJECTS", token: newToken }), 100)
         } else {
           const errMsg = msg.error as string | undefined
           if (errMsg) setAuthError(errMsg)
           else if (!loadingRef.current && isAuthenticatingRef.current) {
-            setAuthError("Invalid API key. Please check your key and try again.")
+            setAuthError("Invalid email or password. Please try again.")
           }
           setToken(null)
           setDisplayName(null)
@@ -99,7 +100,7 @@ export function App() {
         post({
           type: "NOTIFY",
           message:
-            "❌ Failed to load projects. Please check your API key and try again.",
+            "❌ Failed to load projects. Please check your connection and try again.",
         })
         break
 
@@ -194,18 +195,17 @@ export function App() {
 
   // ── Handlers ────────────────────────────────────────────────────────────────
   async function handleLogin() {
-    const trimmed = inputToken.trim()
-    if (trimmed.length > 5) {
-      setIsAuthenticating(true)
-      setAuthError(null)
-      // Main thread validates via PocketBase auth-refresh (see main.ts LOGIN).
-      post({ type: "LOGIN", token: trimmed })
-    } else {
+    const trimmedEmail = email.trim()
+    if (!trimmedEmail || !password) {
       post({
         type: "NOTIFY",
-        message: "❌ Please enter a valid API key or token",
+        message: "❌ Enter your email and password",
       })
+      return
     }
+    setIsAuthenticating(true)
+    setAuthError(null)
+    post({ type: "LOGIN", email: trimmedEmail, password })
   }
 
   function handlePublish() {
@@ -240,7 +240,7 @@ export function App() {
     setIsPublishing(false)
     setIsExporting(false)
     setAuthError(null)
-    setInputToken("")
+    setPassword("")
     setFoundationsNote(null)
   }
 
@@ -249,8 +249,10 @@ export function App() {
   if (!token)
     return (
       <LoginView
-        inputToken={inputToken}
-        setInputToken={setInputToken}
+        email={email}
+        setEmail={setEmail}
+        password={password}
+        setPassword={setPassword}
         onLogin={handleLogin}
         isAuthenticating={isAuthenticating}
         authError={authError}
@@ -289,30 +291,55 @@ function LoadingView() {
 }
 
 function LoginView(props: {
-  inputToken: string
-  setInputToken: (v: string) => void
+  email: string
+  setEmail: (v: string) => void
+  password: string
+  setPassword: (v: string) => void
   onLogin: () => void
   isAuthenticating: boolean
   authError: string | null
 }) {
-  const { inputToken, setInputToken, onLogin, isAuthenticating, authError } =
-    props
-  const disabled = inputToken.trim().length <= 5 || isAuthenticating
+  const {
+    email,
+    setEmail,
+    password,
+    setPassword,
+    onLogin,
+    isAuthenticating,
+    authError,
+  } = props
+  const disabled =
+    !email.trim() || !password || isAuthenticating
   return (
     <div className="view">
       <h1>Design Handoff</h1>
       <p>
-        Paste a PocketBase auth token. For local setup, use a superuser
-        impersonate token from the PocketBase Admin UI.
+        Sign in with your designer account. An admin creates accounts in
+        PocketBase with role <strong>designer</strong>.
       </p>
       <div>
-        <label htmlFor="apikey">PocketBase token</label>
+        <label htmlFor="email">Email</label>
         <input
-          id="apikey"
+          id="email"
+          type="email"
+          autoComplete="username"
+          placeholder="designer@example.com"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") onLogin()
+          }}
+        />
+      </div>
+      <div>
+        <label htmlFor="password">Password</label>
+        <input
+          id="password"
           type="password"
-          placeholder="Paste your token here"
-          value={inputToken}
-          onChange={(e) => setInputToken(e.target.value)}
+          autoComplete="current-password"
+          placeholder="Password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") onLogin()
           }}
@@ -320,12 +347,12 @@ function LoginView(props: {
       </div>
       {authError && <div className="error small">{authError}</div>}
       <button className="primary" disabled={disabled} onClick={onLogin}>
-        {isAuthenticating ? "Validating..." : "Connect Account"}
+        {isAuthenticating ? "Signing in..." : "Sign in"}
       </button>
       <div className="spacer" />
       <p className="small">
-        Admin → Collections → _superusers → your account → Impersonate → copy
-        token. PocketBase must be running at localhost:8090.
+        Admin → Collections → users → New record → role designer. PocketBase
+        must be reachable at the plugin API URL.
       </p>
     </div>
   )

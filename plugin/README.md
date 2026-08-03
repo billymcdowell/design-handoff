@@ -16,23 +16,22 @@ field names (`project`, `frame`, `parent`, `layer`, `owner`).
 
 ## Auth
 
-The login field takes a **PocketBase auth token** (sent as the `Authorization`
-header). A **superuser impersonate token** bypasses owner-scoped API rules, so
-the plugin can write into any dashboard-created project.
+Sign in with a **`users` account that has role `designer`** (email + password).
+The plugin calls PocketBase `auth-with-password`, stores the JWT in
+`figma.clientStorage`, and refreshes it on open via `auth-refresh`.
 
-Generate one from PocketBase Admin:
+Setup:
 
-1. Open `http://localhost:8090/_/`
-2. Collections → `_superusers` → your superuser record
-3. **Impersonate** → copy the token and paste it into the plugin
+1. Open PocketBase Admin (`http://localhost:8090/_/`)
+2. Collections → `users` → **New record**
+3. Set email, password, and **role = designer**
+4. Open the plugin and sign in with those credentials
 
-A regular `users` auth token also works if that user has **role `super`**
-(developers are read-only in the dashboard and cannot publish).
+Developer accounts (`role = developer`) can view the web app but cannot publish
+from the plugin.
 
-**Foundations:** `foundations.owner` must be a `users` record id. When you
-paste a superuser impersonate token, the plugin maps ownership to a dashboard
-user (matching email if one exists, otherwise the owner of an existing project).
-Without a matching user or project, the upload will ask you to create one first.
+**Foundations:** `foundations.owner` must be a `users` record id. A designer
+login already uses that id, so ownership maps directly.
 
 **Sync foundations** mirrors this Figma file’s local variables & styles into a
 per-file slice (other files’ slices are kept). Diffs are semantic (by Figma id);
@@ -40,14 +39,12 @@ the first sync for a file logs an “Initial sync” summary, later syncs only l
 real added/removed/changed tokens, and empty diffs skip history. Non-v2 data is
 replaced on the next sync (no backwards compatibility).
 
-See <https://pocketbase.io/docs/authentication/#api-keys>.
-
 ## Architecture
 
 | Thread | Responsibility |
 | --- | --- |
 | `src/main/*` | Figma extraction (CSS engine, PNG export, foundational export) **and** all PocketBase record writes via raw `fetch` (no CORS in the sandbox; frame PNGs attached via hand-built multipart since `FormData` is unavailable). |
-| `src/ui/*` | React UI (login / dashboard / progress). Validates the pasted token with one authed request, then relays messages to the main thread. |
+| `src/ui/*` | React UI (login / dashboard / progress). Relays email/password to the main thread for auth. |
 
 Data flow on publish: `PUBLISH → createBackendPayload → DATA_READY_FOR_UPLOAD →
 UPLOAD_DATA → project (PATCH) → frames → layers (by depth) → layer_details →
@@ -83,7 +80,6 @@ new frame version (`/frame/{id}?projectId=…`) so you can paste them to teammat
 - **Versioning:** every publish creates *new* `frames` rows (a `frames` row = one
   version snapshot; rows sharing `project` + `name` are versions of one screen).
 - **Free-plan limits** (1 project / 50 frames per project) are enforced exactly as
-  in the plan. With a superuser token the project count reflects *all* projects the
-  token can see — relax `FREE_PLAN_MAX_PROJECTS` in `src/constants.ts` if that is
-  too strict for your setup.
+  in the plan. The project count reflects *all* projects the session can see —
+  relax `FREE_PLAN_MAX_PROJECTS` in `src/constants.ts` if that is too strict.
 - Layer `type` values map 1:1 onto the `layers.type` select in the schema.

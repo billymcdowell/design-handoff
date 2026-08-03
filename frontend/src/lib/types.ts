@@ -11,14 +11,14 @@ export const FIGMA_NODE_TYPES = [
 
 export type LayerType = (typeof FIGMA_NODE_TYPES)[number]
 
-export type UserRole = "super" | "developer"
+export type UserRole = "designer" | "developer"
 
 export interface User extends RecordModel {
   email: string
   name?: string
   avatar?: string
   verified?: boolean
-  /** `super` can mutate; `developer` is read-only (view + copy). */
+  /** `designer` can mutate; `developer` is read-only (view + copy). */
   role?: UserRole
 }
 

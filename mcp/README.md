@@ -9,9 +9,8 @@ Local [Model Context Protocol](https://modelcontextprotocol.io/) server that let
 
 ### Getting a token
 
-1. Sign in to the app at your PocketBase origin
-2. Open DevTools → Network, copy the `Authorization` header value from an API request (the JWT), **or**
-3. In PocketBase Admin → Collections → `users` / `_superusers` → Impersonate, then copy the token
+1. Sign in to the app at your PocketBase origin (designer or developer account)
+2. Open DevTools → Network, copy the `Authorization` header value from an API request (the JWT)
 
 ## Install
 

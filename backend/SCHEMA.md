@@ -31,23 +31,22 @@ Built-in auth collections:
 
 | Who | Collection | Login |
 | --- | --- | --- |
-| Designers / admins | `_superusers` | **Same credentials as PocketBase Admin** (`/_/`) — full create/edit in the app |
-| Developers | `users` | App-only accounts (read + copy; no create/edit/delete) |
+| Designers | `users` (`role: designer`) | Email/password — publish from Figma plugin; manage in the web app |
+| Developers | `users` (`role: developer`) | Email/password — read + copy only |
+| PocketBase Admin | `_superusers` | Admin UI (`/_/`) only — ops / schema; not required for day-to-day publishing |
 
-Create developer accounts in Admin → Collections → `users`. Optional `role`
-field (`super` \| `developer`) still works for rare cases where someone should
-manage content without being a PocketBase Admin; prefer Admin credentials for
-managers.
+Create accounts in Admin → Collections → `users`. Set **role** to `designer`
+or `developer`. There is no public signup.
 
 ```
-_superusers  →  app managers (API rules bypassed)
-users        →  developers (read-only) + optional role=super
+_superusers  →  PocketBase Admin (API rules bypassed; ops only)
+users        →  designers (write) + developers (read-only)
        └─ owns projects / foundations (relation targets)
 ```
 
 `projects.owner` / `foundations.owner` always reference a `users` id. When an
-Admin creates a project, the app links (or creates) a `users` row with the same
-email for that relation.
+Admin creates a project in the web app, the app links (or creates) a `users` row
+with the same email for that relation.
 
 ### 1. `projects`
 
@@ -263,16 +262,16 @@ contain both shadows and blurs are split into synthetic ids
 ## API access rules (role-scoped)
 
 All authenticated users can **list/view** every record. Mutations require
-`@request.auth.role = "super"`.
+`@request.auth.role = "designer"`.
 
 | Collection | List / View | Create / Update / Delete |
 | --- | --- | --- |
-| `projects` | any authed user | super only (create also requires `owner = @request.auth.id`) |
-| `sections` | any authed user | super only |
-| `frames` | any authed user | super only |
-| `layers` | any authed user | super only |
-| `layer_details` | any authed user | super only |
-| `foundations` | any authed user | super only (and `owner = @request.auth.id` on write) |
+| `projects` | any authed user | designer only (create also requires `owner = @request.auth.id`) |
+| `sections` | any authed user | designer only |
+| `frames` | any authed user | designer only |
+| `layers` | any authed user | designer only |
+| `layer_details` | any authed user | designer only |
+| `foundations` | any authed user | designer only (and `owner = @request.auth.id` on write) |
 
 ---
 
@@ -304,16 +303,16 @@ timeout 30s) so the plugin can chunk layer / layer_detail creates.
 1. Open Admin → **Settings → Import collections**
 2. Upload [`schema.json`](schema.json) (same contents as `pb_collections_import.json`)
 3. Leave **Delete missing collections** unchecked (keeps the built-in `users` collection and merges fields)
-4. Confirm — this adds `projects` / `sections` / `frames` / `layers` / `layer_details` / `foundations` **and** the `users.role` field (`super` | `developer`)
+4. Confirm — this adds `projects` / `sections` / `frames` / `layers` / `layer_details` / `foundations` **and** the `users.role` field (`designer` | `developer`)
 
 Then create login users as needed:
 
-- **Managers:** use your existing PocketBase Admin (`_superusers`) account — same
-  email/password as `/_/`. No separate “super” app user required.
+- **Designers:** Admin → Collections → `users` → New (role `designer`). They
+  sign into the Figma plugin and web app with email/password.
 - **Developers:** Admin → Collections → `users` → New (role `developer`).
 
 No public signup / password-reset flows exist by design.
 
-> If you already have `users` rows from before roles were added, open each
-> record and set **role** after importing when using the optional `role=super`
-> path (Admin login does not need this).
+> If you already have `users` rows from before the rename, migration
+> `1785666700_rename_super_to_designer.js` maps `role=super` → `designer`.
+> After a manual schema import, set **role** on each user if needed.
