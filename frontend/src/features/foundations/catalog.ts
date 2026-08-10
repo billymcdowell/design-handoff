@@ -11,20 +11,55 @@ import type {
 const HISTORY_CAP = 50
 const ALIAS_MAX_DEPTH = 20
 
-/** Look up a token by Figma id, including namespaced catalog keys. */
+/** Normalize token path names for fuzzy alias matching (`Orange/9` ≈ `Orange 9`). */
+function normalizeTokenName(name: string): string {
+  return name.trim().toLowerCase().replace(/[/\s_-]+/g, "/")
+}
+
+/** Look up a token by Figma id, stable library key, or (last resort) unique name. */
 export function findCatalogToken(
   catalog: Record<string, FoundationToken>,
   figmaId: string,
+  opts?: { key?: string | null; name?: string | null },
 ): FoundationToken | null {
-  if (!figmaId) return null
-  const direct = catalog[figmaId]
-  if (direct) return direct
-  for (const token of Object.values(catalog)) {
-    if (token.sourceId === figmaId || token.id === figmaId) return token
+  if (figmaId) {
+    const direct = catalog[figmaId]
+    if (direct) return direct
+    for (const token of Object.values(catalog)) {
+      if (token.sourceId === figmaId || token.id === figmaId) return token
+    }
+    for (const [key, token] of Object.entries(catalog)) {
+      if (key.endsWith(`:${figmaId}`)) return token
+    }
   }
-  for (const [key, token] of Object.entries(catalog)) {
-    if (key.endsWith(`:${figmaId}`)) return token
+
+  const aliasKey = opts?.key?.trim()
+  if (aliasKey) {
+    for (const token of Object.values(catalog)) {
+      if (token.key && token.key === aliasKey) return token
+    }
   }
+
+  const aliasName = opts?.name?.trim()
+  if (aliasName) {
+    const needle = normalizeTokenName(aliasName)
+    const matches = Object.values(catalog).filter(
+      (token) => normalizeTokenName(token.name) === needle,
+    )
+    const matchesPrefixed = Object.values(catalog).filter((token) => {
+      const parts = token.name.split(" / ")
+      const leaf = parts[parts.length - 1] ?? token.name
+      return normalizeTokenName(leaf) === needle
+    })
+    const unique =
+      matches.length === 1
+        ? matches[0]
+        : matchesPrefixed.length === 1
+          ? matchesPrefixed[0]
+          : null
+    if (unique) return unique
+  }
+
   return null
 }
 
@@ -104,12 +139,18 @@ export function resolveSemanticValue(
       return { value: current, aliasChain, unresolved: true }
     }
     visited.add(aliasId)
-    aliasChain.push({ id: aliasId, name: current.aliasName })
-
-    const target = findCatalogToken(catalog, aliasId)
+    const target = findCatalogToken(catalog, aliasId, {
+      key: current.aliasKey,
+      name: current.aliasName,
+    })
     if (!target) {
+      aliasChain.push({ id: aliasId, name: current.aliasName })
       return { value: current, aliasChain, unresolved: true }
     }
+    aliasChain.push({
+      id: target.id,
+      name: target.name || current.aliasName,
+    })
 
     const next = pickModeValue(target, modeId, modeName)
     if (!next) {
@@ -139,11 +180,8 @@ export function applyCatalogResolution(
   const out: Record<string, FoundationToken> = {}
 
   for (const [id, token] of Object.entries(catalog)) {
-    if (token.resolvedByMode || token.resolved) {
-      out[id] = token
-      continue
-    }
-
+    // Always recompute from raw valuesByMode/value so key/name fallbacks apply
+    // even when PocketBase still has pre-key unresolved snapshots.
     const resolvedByMode: Record<string, FoundationResolvedModeValue> = {}
     if (token.valuesByMode && token.modes && token.modes.length > 0) {
       for (const mode of token.modes) {

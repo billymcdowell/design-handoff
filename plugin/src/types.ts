@@ -239,7 +239,7 @@ export type FoundationSemanticValue =
   | { kind: "number"; value: number }
   | { kind: "boolean"; value: boolean }
   | { kind: "string"; value: string }
-  | { kind: "alias"; aliasId: string; aliasName: string }
+  | { kind: "alias"; aliasId: string; aliasName: string; aliasKey?: string }
   | {
       kind: "shadow"
       x: number
@@ -298,6 +298,11 @@ export interface FoundationToken {
   name: string
   /** Original Figma variable/style id when catalog key was namespaced. */
   sourceId?: string
+  /**
+   * Stable Figma variable key (same across library publish / consumer files).
+   * Used to resolve aliases that point at library variables from another source.
+   */
+  key?: string
   sourceFileKey: string
   sourceFileName: string
   category: FoundationCategory
@@ -373,6 +378,8 @@ export interface VariableCollectionExport {
 
 export interface VariableExport {
   id: string
+  /** Stable key across library publish / consumer files. */
+  key: string
   name: string
   type: string // "BOOLEAN" | "FLOAT" | "STRING" | "COLOR"
   valuesByMode: Record<string, unknown>
