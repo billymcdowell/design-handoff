@@ -16,10 +16,13 @@ field names (`project`, `frame`, `parent`, `layer`, `owner`).
 
 ## Auth
 
-Sign in with **Microsoft** (Entra ID). The plugin opens
-`${VITE_APP_URL}/oauth/start?session=…` in the system browser; after Microsoft
-login the web app writes a PocketBase JWT into a one-time `oauth_sessions`
-record and the plugin polls until it appears, then stores it in
+Sign in with **Microsoft** (Entra ID) or your dashboard **email and password**.
+
+### Microsoft
+
+The plugin opens `${VITE_APP_URL}/oauth/start?session=…` in the system browser;
+after Microsoft login the web app writes a PocketBase JWT into a one-time
+`oauth_sessions` record and the plugin polls until it appears, then stores it in
 `figma.clientStorage`.
 
 Setup:
@@ -31,6 +34,13 @@ Setup:
 3. First Microsoft sign-in auto-provisions the user as **developer**; promote
    publishers to **designer** in Admin
 4. Rebuild the plugin with `VITE_API_URL` / `VITE_APP_URL` pointing at your hosts
+
+### Email / password
+
+Uses the same `users` credentials as the web app login. The plugin posts to
+PocketBase `auth-with-password` and stores the JWT in `figma.clientStorage`
+(same path as Microsoft). Password auth must be enabled on the `users`
+collection.
 
 Designer accounts can publish. Developer accounts can sign in read-only (publish
 buttons disabled; PocketBase API rules still reject writes).
@@ -54,8 +64,8 @@ entirely. Non-v2 data is replaced on the next sync (no backwards compatibility).
 
 | Thread | Responsibility |
 | --- | --- |
-| `src/main/*` | Figma extraction (CSS engine, PNG export, foundational export) **and** all PocketBase record writes via raw `fetch` (no CORS in the sandbox; frame PNGs attached via hand-built multipart since `FormData` is unavailable). Opens the system browser for Microsoft OAuth and polls `oauth_sessions`. |
-| `src/ui/*` | React UI (Microsoft login / dashboard / progress). Relays `LOGIN_MICROSOFT` to the main thread. |
+| `src/main/*` | Figma extraction (CSS engine, PNG export, foundational export) **and** all PocketBase record writes via raw `fetch` (no CORS in the sandbox; frame PNGs attached via hand-built multipart since `FormData` is unavailable). Opens the system browser for Microsoft OAuth and polls `oauth_sessions`; also handles email/password via `auth-with-password`. |
+| `src/ui/*` | React UI (Microsoft / email-password login / dashboard / progress). Relays `LOGIN_MICROSOFT` and `LOGIN_PASSWORD` to the main thread. |
 
 Data flow on publish: `PUBLISH → createBackendPayload → DATA_READY_FOR_UPLOAD →
 UPLOAD_DATA → project (PATCH) → frames → layers (by depth) → layer_details →

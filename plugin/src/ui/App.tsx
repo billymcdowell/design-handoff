@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, type FormEvent } from "react"
 import type {
   BackendPayload,
   Project,
@@ -23,6 +23,9 @@ export function App() {
   const [isExporting, setIsExporting] = useState(false)
   const [isSyncingComponents, setIsSyncingComponents] = useState(false)
   const [isAuthenticating, setIsAuthenticating] = useState(false)
+  const [authMethod, setAuthMethod] = useState<"microsoft" | "password" | null>(
+    null,
+  )
   const [authError, setAuthError] = useState<string | null>(null)
   const [projects, setProjects] = useState<Project[]>([])
   const [selectedProjectId, setSelectedProjectId] = useState("")
@@ -65,6 +68,7 @@ export function App() {
       case "AUTH_RESULT": {
         const newToken = (msg.token as string | null) ?? null
         setIsAuthenticating(false)
+        setAuthMethod(null)
         if (newToken) {
           setToken(newToken)
           setDisplayName((msg.displayName as string | undefined) || "User")
@@ -78,7 +82,7 @@ export function App() {
           if (errMsg && errMsg !== "Sign-in cancelled.") setAuthError(errMsg)
           else if (errMsg === "Sign-in cancelled.") setAuthError(null)
           else if (!loadingRef.current && isAuthenticatingRef.current) {
-            setAuthError("Microsoft sign-in failed. Please try again.")
+            setAuthError("Sign-in failed. Please try again.")
           }
           setToken(null)
           setDisplayName(null)
@@ -223,13 +227,22 @@ export function App() {
   // ── Handlers ────────────────────────────────────────────────────────────────
   function handleMicrosoftLogin() {
     setIsAuthenticating(true)
+    setAuthMethod("microsoft")
     setAuthError(null)
     post({ type: "LOGIN_MICROSOFT" })
+  }
+
+  function handlePasswordLogin(email: string, password: string) {
+    setIsAuthenticating(true)
+    setAuthMethod("password")
+    setAuthError(null)
+    post({ type: "LOGIN_PASSWORD", email, password })
   }
 
   function handleCancelLogin() {
     post({ type: "CANCEL_LOGIN" })
     setIsAuthenticating(false)
+    setAuthMethod(null)
   }
 
   function handlePublish() {
@@ -296,6 +309,7 @@ export function App() {
     setIsExporting(false)
     setIsSyncingComponents(false)
     setAuthError(null)
+    setAuthMethod(null)
     setFoundationsNote(null)
     setComponentsNote(null)
   }
@@ -305,9 +319,11 @@ export function App() {
   if (!token)
     return (
       <LoginView
-        onLogin={handleMicrosoftLogin}
+        onMicrosoftLogin={handleMicrosoftLogin}
+        onPasswordLogin={handlePasswordLogin}
         onCancel={handleCancelLogin}
         isAuthenticating={isAuthenticating}
+        authMethod={authMethod}
         authError={authError}
       />
     )
@@ -348,22 +364,47 @@ function LoadingView() {
 }
 
 function LoginView(props: {
-  onLogin: () => void
+  onMicrosoftLogin: () => void
+  onPasswordLogin: (email: string, password: string) => void
   onCancel: () => void
   isAuthenticating: boolean
+  authMethod: "microsoft" | "password" | null
   authError: string | null
 }) {
-  const { onLogin, onCancel, isAuthenticating, authError } = props
+  const {
+    onMicrosoftLogin,
+    onPasswordLogin,
+    onCancel,
+    isAuthenticating,
+    authMethod,
+    authError,
+  } = props
+  const [email, setEmail] = useState("")
+  const [password, setPassword] = useState("")
+
+  const waitingMicrosoft = isAuthenticating && authMethod === "microsoft"
+  const waitingPassword = isAuthenticating && authMethod === "password"
+  const formDisabled = isAuthenticating
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault()
+    if (formDisabled) return
+    const trimmed = email.trim()
+    if (!trimmed || !password) return
+    onPasswordLogin(trimmed, password)
+  }
+
   return (
     <div className="view">
       <h1>Design Handoff</h1>
       <p>
-        Sign in with Microsoft. Only accounts with role{" "}
-        <strong>designer</strong> can publish; developers can sign in
+        Sign in with Microsoft or your email and password. Only accounts with
+        role <strong>designer</strong> can publish; developers can sign in
         read-only.
       </p>
       {authError && <div className="error small">{authError}</div>}
-      {isAuthenticating ? (
+
+      {waitingMicrosoft ? (
         <>
           <p className="small">
             Waiting for Microsoft sign-in in your browser…
@@ -376,14 +417,58 @@ function LoginView(props: {
           </button>
         </>
       ) : (
-        <button className="primary" onClick={onLogin}>
+        <button
+          className="primary"
+          onClick={onMicrosoftLogin}
+          disabled={formDisabled}
+        >
           Sign in with Microsoft
         </button>
       )}
+
+      <div className="auth-divider">
+        <span>or</span>
+      </div>
+
+      <form className="auth-form" onSubmit={handleSubmit}>
+        <div>
+          <label htmlFor="email">Email</label>
+          <input
+            id="email"
+            type="email"
+            autoComplete="username"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            disabled={formDisabled}
+            required
+          />
+        </div>
+        <div>
+          <label htmlFor="password">Password</label>
+          <input
+            id="password"
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            disabled={formDisabled}
+            required
+          />
+        </div>
+        <button
+          className="primary"
+          type="submit"
+          disabled={formDisabled || !email.trim() || !password}
+        >
+          {waitingPassword ? "Signing in…" : "Sign in with email"}
+        </button>
+      </form>
+
       <div className="spacer" />
       <p className="small">
-        A browser window will open to complete sign-in. New Microsoft accounts
-        are provisioned as developer until an admin promotes them in PocketBase.
+        Microsoft opens a browser window to complete sign-in. New Microsoft
+        accounts are provisioned as developer until an admin promotes them in
+        PocketBase.
       </p>
     </div>
   )

@@ -296,7 +296,7 @@ function sleep(ms: number): Promise<void> {
 
 /**
  * Sign in with a dashboard `users` email/password.
- * Kept for local/dev cutover; the plugin UI uses Microsoft OAuth.
+ * Used by the plugin login form alongside Microsoft OAuth.
  */
 export async function authWithPassword(
   email: string,

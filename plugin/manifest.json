@@ -12,9 +12,7 @@
     "allowedDomains": ["none"],
     "devAllowedDomains": [
       "http://localhost:8090",
-      "http://127.0.0.1:8090",
-      "http://localhost:5173",
-      "http://127.0.0.1:5173"
+      "http://localhost:5173"
     ],
     "reasoning": "The plugin talks to PocketBase for auth and publishing, and opens the web app origin for Microsoft OAuth (/oauth/start). Add your production PocketBase and web app origins to allowedDomains before publishing."
   }

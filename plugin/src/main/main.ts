@@ -21,6 +21,7 @@ import {
 import { fetchProjectsFromApi, resolveProjectForPublish } from "./planLimits"
 import {
   assertCanPublish,
+  authWithPassword,
   createLibraryComponentRecord,
   createLibraryComponentVariantRecord,
   deleteLibraryComponentRecord,
@@ -204,6 +205,48 @@ figma.ui.onmessage = async (msg: Msg) => {
         })
       } finally {
         if (oauthCancel === cancel) oauthCancel = null
+      }
+      break
+    }
+
+    case "LOGIN_PASSWORD": {
+      const email =
+        typeof msg.email === "string" ? msg.email.trim() : ""
+      const password = typeof msg.password === "string" ? msg.password : ""
+      if (!email || !password) {
+        figma.ui.postMessage({
+          type: "AUTH_RESULT",
+          token: null,
+          error: "Email and password are required.",
+        })
+        break
+      }
+      try {
+        const check = await authWithPassword(email, password)
+        if (!check.ok) {
+          figma.ui.postMessage({
+            type: "AUTH_RESULT",
+            token: null,
+            error: check.error,
+          })
+          break
+        }
+        await figma.clientStorage.setAsync(STORAGE_KEY_TOKEN, check.token)
+        const saved = await figma.clientStorage.getAsync(STORAGE_KEY_TOKEN)
+        if (saved === check.token) {
+          postAuthResult(check)
+        } else {
+          throw new Error("Read-back mismatch")
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        figma.notify(`❌ Failed to sign in: ${message}`)
+        await figma.clientStorage.setAsync(STORAGE_KEY_TOKEN, null)
+        figma.ui.postMessage({
+          type: "AUTH_RESULT",
+          token: null,
+          error: message,
+        })
       }
       break
     }
