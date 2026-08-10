@@ -114,8 +114,8 @@ migrate(
           name: "figma_node_id",
           type: "text",
           required: false,
-          max: 64,
-          help: "Raw Figma node id for deep links.",
+          max: 512,
+          help: "Raw Figma node id for deep links (may be long for nested instances).",
         },
         {
           id: "file_libcomp_preview",

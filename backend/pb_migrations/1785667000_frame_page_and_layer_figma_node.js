@@ -28,7 +28,7 @@ migrate(
         required: false,
         presentable: false,
         min: 0,
-        max: 64,
+        max: 512,
         pattern: "",
       }),
     )

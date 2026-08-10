@@ -105,7 +105,7 @@ with the same email for that relation.
 | `x`, `y`, `width`, `height` | number | frame-relative bounds |
 | `clickable` | bool | overlay hit-testing (plugin sets `true`) |
 | `sort_order` | number | z-order within siblings |
-| `figma_node_id` | text | optional — raw Figma node id for deep links |
+| `figma_node_id` | text | optional — raw Figma node id for deep links (max 512; nested instance ids can be long) |
 
 ### 5. `layer_details` — 1:1 with `layers`
 
@@ -169,7 +169,7 @@ Developers (and all authenticated users) can read it.
 | `name` | text | display name |
 | `kind` | select | `COMPONENT` \| `COMPONENT_SET` |
 | `file_key` / `file_name` | text | source Figma file |
-| `figma_node_id` | text | optional — deep link target |
+| `figma_node_id` | text | optional — deep link target (max 512) |
 | `preview` | file | default variant / set thumbnail |
 | `variants` | json | `[{ key, name, properties, figma_node_id }]` |
 | `tokens_used` | json | `[{ id, name }]` bound variables/styles |
@@ -379,6 +379,9 @@ docker compose up -d --build
 
 `1785667200_component_libraries.js` adds `component_libraries` (singleton
 meta) and `library_components` (per-component rows with preview files).
+
+`1785667300_figma_node_id_max_length.js` raises `figma_node_id` max from 64
+to 512 on `layers` and `library_components` (nested instance ids exceeded 64).
 
 `1785667100_foundations_singleton_slug.js` wipes foundations rows, replaces
 per-user `owner` with unique `slug` (`default` singleton), and lets any
