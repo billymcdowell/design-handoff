@@ -199,6 +199,7 @@ export async function uploadData(
             sort_order: index,
             content_hash: contentHash || undefined,
             section,
+            page_name: frame.pageName,
             // Only set image_url when there is an external URL and no bytes.
             image_url:
               !image && detail?.imageUrl && !detail.imageUrl.startsWith("__PENDING")
@@ -252,6 +253,7 @@ export async function uploadData(
             height: item.layer.height,
             clickable: item.layer.clickable,
             sort_order: item.siblingIndex,
+            figma_node_id: item.layer.id,
           },
         })
       }
@@ -289,6 +291,9 @@ export async function uploadData(
             styles: layerDetail.styles,
             typography: layerDetail.typography,
             code: layerDetail.code,
+            ...(layerDetail.component
+              ? { component: layerDetail.component }
+              : {}),
           })
         }
       }

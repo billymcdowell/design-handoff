@@ -21,6 +21,8 @@ export interface Frame {
   height: number // Math.round
   thumbnail: string // placeholder SVG URL
   figmaUrl: string // deep link with node-id
+  /** Figma page name the frame was published from. */
+  pageName?: string
 }
 
 export interface Layer {
@@ -40,11 +42,40 @@ export interface FrameDetail extends Frame {
   layers: Layer[] // hierarchical tree, depth 0 = direct children of frame
 }
 
+/** Structured auto-layout specs for the frame inspector (separate from generated CSS). */
+export interface AutoLayoutSpec {
+  mode: "NONE" | "HORIZONTAL" | "VERTICAL" | "GRID"
+  direction?: "row" | "column"
+  gap?: string
+  justifyContent?: string
+  alignItems?: string
+  wrap?: "wrap" | "nowrap"
+  sizingHorizontal?: "FIXED" | "HUG" | "FILL"
+  sizingVertical?: "FIXED" | "HUG" | "FILL"
+}
+
+export interface ConstraintsSpec {
+  horizontal: string
+  vertical: string
+}
+
+/** Component / instance identity for handoff context. */
+export interface ComponentSpec {
+  kind: "COMPONENT" | "INSTANCE" | "COMPONENT_SET"
+  name: string
+  mainComponentName?: string
+  componentSetName?: string
+  variantProperties?: Record<string, string>
+  componentProperties?: Record<string, string>
+}
+
 export interface Layout {
   position: { x: number; y: number }
   dimensions: { width: number; height: number }
   padding?: { top: number; right: number; bottom: number; left: number }
   margin?: { top: number; right: number; bottom: number; left: number }
+  autoLayout?: AutoLayoutSpec
+  constraints?: ConstraintsSpec
 }
 
 /** Figma variable or style reference resolved at publish time. */
@@ -89,7 +120,9 @@ export interface Typography {
   color: string
   textAlign: string // "left" | "center" | "right"
   textDecoration: string // "underline" | "none"
-  textTransform: string // always "none"
+  textTransform: string // "none" | "uppercase" | "lowercase" | "capitalize"
+  /** Actual text content (truncated for very large nodes). */
+  characters?: string
   /** Applied local/library text style. */
   textStyle?: TokenRef
   /** Color variable bound to the text fill. */
@@ -114,6 +147,8 @@ export interface LayerDetail {
   styles: Styles
   typography: Typography | null
   code: Code
+  /** Present for COMPONENT / INSTANCE nodes. */
+  component?: ComponentSpec
 }
 
 export interface BackendPayload {

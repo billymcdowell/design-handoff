@@ -70,6 +70,7 @@ export async function getDesignSpecs(args: GetDesignSpecsArgs) {
       project: frame.project,
       figma_url: frame.figma_url,
       image_url: frame.image_url,
+      page_name: frame.page_name,
     },
     project,
     layer_count: merged.length,

@@ -653,6 +653,21 @@
         "type": "text"
       },
       {
+        "autogeneratePattern": "",
+        "help": "Figma page name the screen was published from.",
+        "hidden": false,
+        "id": "txt_frames_page_name",
+        "max": 255,
+        "min": 0,
+        "name": "page_name",
+        "pattern": "",
+        "presentable": false,
+        "primaryKey": false,
+        "required": false,
+        "system": false,
+        "type": "text"
+      },
+      {
         "hidden": false,
         "id": "_pbf_autodate_created_",
         "name": "created",
@@ -874,6 +889,21 @@
         "type": "number"
       },
       {
+        "autogeneratePattern": "",
+        "help": "Raw Figma node id used for Open in Figma deep links.",
+        "hidden": false,
+        "id": "txt_layers_figma_node_id",
+        "max": 64,
+        "min": 0,
+        "name": "figma_node_id",
+        "pattern": "",
+        "presentable": false,
+        "primaryKey": false,
+        "required": false,
+        "system": false,
+        "type": "text"
+      },
+      {
         "hidden": false,
         "id": "_pbf_autodate_created_",
         "name": "created",
@@ -979,6 +1009,17 @@
         "id": "json_layer_details_code",
         "maxSize": 2000000,
         "name": "code",
+        "presentable": false,
+        "required": false,
+        "system": false,
+        "type": "json"
+      },
+      {
+        "help": "Component/instance identity: kind, name, mainComponentName, componentSetName, variantProperties, componentProperties",
+        "hidden": false,
+        "id": "json_layer_details_component",
+        "maxSize": 2000000,
+        "name": "component",
         "presentable": false,
         "required": false,
         "system": false,

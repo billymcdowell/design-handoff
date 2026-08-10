@@ -88,6 +88,7 @@ with the same email for that relation.
 | `image` | file | optional — main frame render |
 | `image_url` | url | optional external fallback |
 | `figma_url` | url | optional deep link |
+| `page_name` | text | optional — Figma page the screen was published from |
 | `sort_order` | number | optional |
 
 ### 4. `layers`
@@ -101,16 +102,18 @@ with the same email for that relation.
 | `x`, `y`, `width`, `height` | number | frame-relative bounds |
 | `clickable` | bool | overlay hit-testing (plugin sets `true`) |
 | `sort_order` | number | z-order within siblings |
+| `figma_node_id` | text | optional — raw Figma node id for deep links |
 
 ### 5. `layer_details` — 1:1 with `layers`
 
 | Field | Type | Notes |
 | --- | --- | --- |
 | `layer` | relation → `layers` | required, **unique**, cascade delete |
-| `layout` | json | `{ position, dimensions, padding?, margin? }` |
-| `styles` | json | `{ backgroundColor?, borderRadius?, borderWidth?, borderColor?, boxShadow?, opacity?, backgroundColorToken?, borderColorToken?, effectStyle? }` |
-| `typography` | json | `{ fontFamily, fontSize, fontWeight, lineHeight, letterSpacing, color, textAlign, textStyle?, colorToken?, characters?, … } \| null` |
+| `layout` | json | `{ position, dimensions, padding?, margin?, autoLayout?, constraints? }` |
+| `styles` | json | `{ backgroundColor?, borderRadius?, borderWidth?, borderColor?, boxShadow?, opacity?, effects?, backgroundColorToken?, borderColorToken?, effectStyle? }` |
+| `typography` | json | `{ fontFamily, fontSize, fontWeight, lineHeight, letterSpacing, color, textAlign, textDecoration?, textTransform?, characters?, textStyle?, colorToken?, … } \| null` |
 | `code` | json | `{ css, tailwind, react }` |
+| `component` | json | optional `{ kind, name, mainComponentName?, componentSetName?, variantProperties?, componentProperties? }` |
 
 Token/style refs (optional, resolved at publish time):
 
@@ -196,6 +199,9 @@ frontend reads the PocketBase fields directly.
 | `project.figmaFileUrl` | `projects.figma_file_url` | `Project.figma_file_url` |
 | `project.frameCount` | `projects.frame_count` | `Project.frame_count` |
 | `frame.figmaUrl` | `frames.figma_url` | `Frame.figma_url` |
+| `frame.pageName` | `frames.page_name` | `Frame.page_name` |
+| `layer.id` (Figma) | `layers.figma_node_id` | `Layer.figma_node_id` |
+| `layerDetail.component` | `layer_details.component` | `LayerDetail.component` |
 | `frameDetail.imageUrl` (http) | `frames.image_url` | `Frame.image_url` |
 | `frameDetail.imageUrl` (data:) | `frames.thumbnail` (file) | `Frame.thumbnail` |
 | `frame` → parent screen | `frames.project` | `Frame.project` |

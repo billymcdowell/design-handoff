@@ -21,6 +21,7 @@ export async function listFrames(projectId: string) {
       created: f.created,
       figma_url: f.figma_url,
       image_url: f.image_url,
+      page_name: f.page_name,
       url_path: `/frame/${f.id}?projectId=${projectId}`,
     })),
   }

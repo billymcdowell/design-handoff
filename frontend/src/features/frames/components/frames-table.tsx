@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router"
 import { useDraggable } from "@dnd-kit/core"
 import { format } from "date-fns"
-import { MoreVertical, Image as ImageIcon } from "lucide-react"
+import { MoreVertical, Image as ImageIcon, ExternalLink } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -333,6 +333,16 @@ function FrameCardView({
             />
             <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={onView}>View</DropdownMenuItem>
+              {frame.figma_url && (
+                <DropdownMenuItem
+                  onClick={() =>
+                    window.open(frame.figma_url, "_blank", "noopener,noreferrer")
+                  }
+                >
+                  <ExternalLink className="size-4" />
+                  View in Figma
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem
                 onClick={() => void copyShareLink(frameShareUrl(frame.id, projectId))}
               >
@@ -375,14 +385,29 @@ function FrameCardView({
           {frame.width && frame.height
             ? `${Math.round(frame.width)}×${Math.round(frame.height)}`
             : "—"}
+          {frame.page_name ? ` · ${frame.page_name}` : ""}
         </span>
-        <span className="truncate text-right">
-          {[
-            frameUploaderLabel(frame),
-            format(new Date(frame.updated || frame.created), "MMM d, yyyy"),
-          ]
-            .filter(Boolean)
-            .join(" · ")}
+        <span className="flex items-center gap-2 truncate text-right">
+          {frame.figma_url && (
+            <a
+              href={frame.figma_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-foreground hover:text-primary inline-flex shrink-0 items-center gap-1 hover:underline"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <ExternalLink className="size-3" />
+              Figma
+            </a>
+          )}
+          <span className="truncate">
+            {[
+              frameUploaderLabel(frame),
+              format(new Date(frame.updated || frame.created), "MMM d, yyyy"),
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </span>
         </span>
       </CardFooter>
     </Card>

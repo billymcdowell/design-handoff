@@ -14,6 +14,7 @@ export function toLayerSpecs(
     layout: detail.layout,
     styles: detail.styles,
     typography: detail.typography ?? null,
+    component: detail.component,
   }
 
   if (options.includeCode && detail.code) {
@@ -43,6 +44,7 @@ export function mergeLayersWithDetails(
     width: layer.width,
     height: layer.height,
     sort_order: layer.sort_order,
+    figma_node_id: layer.figma_node_id,
     specs: toLayerSpecs(detailsByLayerId.get(layer.id), options),
   }))
 }

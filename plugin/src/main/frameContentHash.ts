@@ -67,6 +67,7 @@ function detailsFingerprint(
       layout: detail.layout ?? null,
       styles: detail.styles ?? null,
       typography: detail.typography ?? null,
+      component: detail.component ?? null,
       // Intentionally omit `code` — it's derived and format changes shouldn't
       // force a new version.
     }
@@ -74,7 +75,7 @@ function detailsFingerprint(
 }
 
 export function computeFrameContentHash(args: {
-  frame: Pick<Frame, "width" | "height">
+  frame: Pick<Frame, "width" | "height" | "pageName">
   detail: Pick<FrameDetail, "layers">
   layers: Record<string, LayerDetail>
   imageBytes?: Uint8Array
@@ -83,6 +84,7 @@ export function computeFrameContentHash(args: {
   const structural = stableStringify({
     width: args.frame.width,
     height: args.frame.height,
+    pageName: args.frame.pageName ?? null,
     layers: layerTreeFingerprint(args.detail.layers),
     details: detailsFingerprint(layerIds, args.layers),
   })

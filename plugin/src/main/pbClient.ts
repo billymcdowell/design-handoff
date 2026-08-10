@@ -483,6 +483,8 @@ export interface FrameFields {
   section?: string
   /** Fingerprint used to skip unchanged republishes. */
   content_hash?: string
+  /** Figma page name the frame was published from. */
+  page_name?: string
 }
 
 function escapeFilterValue(value: string): string {
@@ -672,6 +674,8 @@ export interface LayerFields {
   height?: number
   clickable?: boolean
   sort_order?: number
+  /** Raw Figma node id for deep links. */
+  figma_node_id?: string
 }
 
 export async function createLayerRecord(
@@ -689,6 +693,7 @@ export interface LayerDetailFields {
   styles: unknown
   typography: unknown
   code: unknown
+  component?: unknown
 }
 
 export async function createLayerDetailRecord(

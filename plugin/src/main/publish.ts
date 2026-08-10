@@ -30,6 +30,16 @@ export function isPublishableFrame(node: SceneNode): boolean {
   return VALID_FRAME_TYPES.includes(node.type)
 }
 
+/** Walk parents until a PAGE node is found. */
+export function resolvePageName(node: BaseNode): string | undefined {
+  let current: BaseNode | null = node
+  while (current) {
+    if (current.type === "PAGE") return current.name
+    current = current.parent
+  }
+  return undefined
+}
+
 type ProgressFn = (current: number, total: number, message: string) => void
 
 // 10.3 ── exportFramePng — dimension-fallback ladder under MAX_FILE_SIZE ─────
@@ -122,16 +132,16 @@ export async function createBackendPayload(
 
   clearPendingImages()
 
-  // Build file URL.
+  // Build file URL (prefer current /design/ deep-link format).
   const fileKey = figma.fileKey
   let fileUrl: string
   if (fileKey) {
-    fileUrl = `https://figma.com/file/${fileKey}`
+    fileUrl = `https://www.figma.com/design/${fileKey}`
   } else {
     console.warn(
       "File not saved to Figma servers — using placeholder file URL.",
     )
-    fileUrl = "https://figma.com/file/unknown"
+    fileUrl = "https://www.figma.com/design/unknown"
   }
 
   const project: Project = {
@@ -181,6 +191,8 @@ export async function createBackendPayload(
       const imageBytes = await exportFramePng(frame)
       setPendingImage(frameId, { bytes: imageBytes, fileName })
 
+      const pageName = resolvePageName(frame)
+
       const frameEntry: Frame = {
         id: frameId,
         name: frame.name,
@@ -188,6 +200,7 @@ export async function createBackendPayload(
         height: Math.round(frame.height),
         thumbnail,
         figmaUrl: frameUrl,
+        ...(pageName ? { pageName } : {}),
       }
 
       let layers: Layer[] = []

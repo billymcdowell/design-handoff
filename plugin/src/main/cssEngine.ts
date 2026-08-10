@@ -5,7 +5,10 @@
 // CSS/Tailwind/React code. No network, no side effects.
 
 import type {
+  AutoLayoutSpec,
   Code,
+  ComponentSpec,
+  ConstraintsSpec,
   EffectDetail,
   Layer,
   LayerDetail,
@@ -14,6 +17,9 @@ import type {
   TokenRef,
   Typography,
 } from "../types"
+
+/** Max characters exported for TEXT nodes (keeps payloads bounded). */
+const MAX_TEXT_CHARACTERS = 5000
 
 type Bounds = { x: number; y: number; width: number; height: number }
 
@@ -804,7 +810,32 @@ export async function extractTypography(node: TextNode): Promise<Typography> {
   else if (node.textAlignHorizontal === "RIGHT") textAlign = "right"
 
   const textDecoration =
-    node.textDecoration === "UNDERLINE" ? "underline" : "none"
+    node.textDecoration === "UNDERLINE"
+      ? "underline"
+      : node.textDecoration === "STRIKETHROUGH"
+        ? "line-through"
+        : "none"
+
+  let textTransform = "none"
+  const textCase = node.textCase
+  if (textCase !== figma.mixed) {
+    if (textCase === "UPPER") textTransform = "uppercase"
+    else if (textCase === "LOWER") textTransform = "lowercase"
+    else if (textCase === "TITLE") textTransform = "capitalize"
+  }
+
+  let characters: string | undefined
+  try {
+    const raw = node.characters
+    if (raw) {
+      characters =
+        raw.length > MAX_TEXT_CHARACTERS
+          ? `${raw.slice(0, MAX_TEXT_CHARACTERS)}…`
+          : raw
+    }
+  } catch {
+    /* ignore mixed / unloaded */
+  }
 
   const [colorToken, textStyle] = await Promise.all([
     getFillColorToken(node),
@@ -820,10 +851,138 @@ export async function extractTypography(node: TextNode): Promise<Typography> {
     color,
     textAlign,
     textDecoration,
-    textTransform: "none",
+    textTransform,
+    ...(characters !== undefined ? { characters } : {}),
     ...(textStyle ? { textStyle } : {}),
     ...(colorToken ? { colorToken } : {}),
   }
+}
+
+/** Structured auto-layout for the Layout inspector tab. */
+export function extractAutoLayoutSpec(node: SceneNode): AutoLayoutSpec | undefined {
+  if (!("layoutMode" in node)) return undefined
+  const n = node as AutoLayoutNode
+  if (n.layoutMode === "NONE") return undefined
+
+  const spec: AutoLayoutSpec = { mode: n.layoutMode }
+
+  if (n.layoutMode === "HORIZONTAL" || n.layoutMode === "VERTICAL") {
+    spec.direction = n.layoutMode === "HORIZONTAL" ? "row" : "column"
+    spec.gap = toPx(n.itemSpacing)
+    spec.justifyContent = mapPrimaryAlign(n.primaryAxisAlignItems)
+    spec.alignItems = mapCounterAlign(n.counterAxisAlignItems)
+    spec.wrap = n.layoutWrap === "WRAP" ? "wrap" : "nowrap"
+  } else if (n.layoutMode === "GRID") {
+    if ("gridColumnGap" in n || "gridRowGap" in n) {
+      const col = "gridColumnGap" in n ? n.gridColumnGap : 0
+      const row = "gridRowGap" in n ? n.gridRowGap : 0
+      spec.gap = col === row ? toPx(col) : `${toPx(row)} ${toPx(col)}`
+    }
+    if ("primaryAxisAlignItems" in n) {
+      spec.justifyContent = mapPrimaryAlign(n.primaryAxisAlignItems)
+    }
+    if ("counterAxisAlignItems" in n) {
+      spec.alignItems = mapCounterAlign(n.counterAxisAlignItems)
+    }
+  }
+
+  if ("layoutSizingHorizontal" in n && n.layoutSizingHorizontal) {
+    spec.sizingHorizontal = n.layoutSizingHorizontal
+  }
+  if ("layoutSizingVertical" in n && n.layoutSizingVertical) {
+    spec.sizingVertical = n.layoutSizingVertical
+  }
+
+  return spec
+}
+
+export function extractConstraintsSpec(
+  node: SceneNode,
+): ConstraintsSpec | undefined {
+  if (!("constraints" in node) || !node.constraints) return undefined
+  return {
+    horizontal: node.constraints.horizontal,
+    vertical: node.constraints.vertical,
+  }
+}
+
+export async function extractComponentSpec(
+  node: SceneNode,
+): Promise<ComponentSpec | undefined> {
+  if (node.type === "COMPONENT") {
+    const component = node as ComponentNode
+    let componentSetName: string | undefined
+    try {
+      const parent = component.parent
+      if (parent && parent.type === "COMPONENT_SET") {
+        componentSetName = parent.name
+      }
+    } catch {
+      /* ignore */
+    }
+    const variantProperties =
+      "variantProperties" in component && component.variantProperties
+        ? { ...component.variantProperties }
+        : undefined
+    return {
+      kind: "COMPONENT",
+      name: component.name,
+      ...(componentSetName ? { componentSetName } : {}),
+      ...(variantProperties && Object.keys(variantProperties).length > 0
+        ? { variantProperties }
+        : {}),
+    }
+  }
+
+  if (node.type === "INSTANCE") {
+    const instance = node as InstanceNode
+    let mainComponentName: string | undefined
+    let componentSetName: string | undefined
+    try {
+      const main = await instance.getMainComponentAsync()
+      if (main) {
+        mainComponentName = main.name
+        const parent = main.parent
+        if (parent && parent.type === "COMPONENT_SET") {
+          componentSetName = parent.name
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+
+    const variantProperties =
+      instance.variantProperties && Object.keys(instance.variantProperties).length > 0
+        ? { ...instance.variantProperties }
+        : undefined
+
+    const componentProperties: Record<string, string> = {}
+    try {
+      const props = instance.componentProperties
+      for (const [key, value] of Object.entries(props)) {
+        if (value.type === "TEXT" || value.type === "BOOLEAN") {
+          componentProperties[key] = String(value.value)
+        } else if (value.type === "VARIANT") {
+          componentProperties[key] = String(value.value)
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+
+    return {
+      kind: "INSTANCE",
+      name: instance.name,
+      ...(mainComponentName ? { mainComponentName } : {}),
+      ...(componentSetName ? { componentSetName } : {}),
+      ...(variantProperties ? { variantProperties } : {}),
+      ...(Object.keys(componentProperties).length > 0
+        ? { componentProperties }
+        : {}),
+    }
+  }
+
+  return undefined
 }
 
 // 11.12 ── generateCSS ──────────────────────────────────────────────────────
@@ -1227,6 +1386,19 @@ export async function nodeToLayerDetail(
     }
   }
 
+  const autoLayout = extractAutoLayoutSpec(node)
+  if (autoLayout) layout.autoLayout = autoLayout
+
+  const constraints = extractConstraintsSpec(node)
+  // Only surface constraints when the node is not an auto-layout child
+  // (auto-layout owns sizing/position) or when it is absolutely positioned.
+  if (constraints) {
+    const parentMode = getParentLayoutMode(node)
+    if (!parentMode || parentMode === "NONE" || isAbsoluteLayoutChild(node)) {
+      layout.constraints = constraints
+    }
+  }
+
   const fills = "fills" in node ? node.fills : undefined
   const backgroundColor =
     getFillColor(fills) || (node.type === "TEXT" ? "transparent" : "#F3F4F6")
@@ -1240,14 +1412,16 @@ export async function nodeToLayerDetail(
   const effects = getEffects(nodeEffects)
   const opacity = getOpacity(node)
 
-  const [fillColorToken, borderColorToken, effectStyle, typography] = await Promise.all([
-    node.type === "TEXT" ? Promise.resolve(undefined) : getFillColorToken(node),
-    getStrokeColorToken(node),
-    getEffectStyleRef(node),
-    node.type === "TEXT"
-      ? extractTypography(node as TextNode)
-      : Promise.resolve(null),
-  ])
+  const [fillColorToken, borderColorToken, effectStyle, typography, component] =
+    await Promise.all([
+      node.type === "TEXT" ? Promise.resolve(undefined) : getFillColorToken(node),
+      getStrokeColorToken(node),
+      getEffectStyleRef(node),
+      node.type === "TEXT"
+        ? extractTypography(node as TextNode)
+        : Promise.resolve(null),
+      extractComponentSpec(node),
+    ])
 
   const styles: Styles = {
     backgroundColor,
@@ -1295,5 +1469,6 @@ export async function nodeToLayerDetail(
     styles,
     typography,
     code,
+    ...(component ? { component } : {}),
   }
 }

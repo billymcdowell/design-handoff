@@ -21,6 +21,7 @@ export interface Frame {
   thumbnail_url?: string
   image_url?: string
   figma_url?: string
+  page_name?: string
   sort_order?: number
   updated?: string
   created?: string
@@ -41,6 +42,7 @@ export interface Layer {
   height?: number
   clickable?: boolean
   sort_order?: number
+  figma_node_id?: string
 }
 
 export interface LayerDetail {
@@ -51,6 +53,20 @@ export interface LayerDetail {
     dimensions?: { width: number; height: number }
     padding?: { top: number; right: number; bottom: number; left: number }
     margin?: { top: number; right: number; bottom: number; left: number }
+    autoLayout?: {
+      mode: "NONE" | "HORIZONTAL" | "VERTICAL" | "GRID"
+      direction?: "row" | "column"
+      gap?: string
+      justifyContent?: string
+      alignItems?: string
+      wrap?: "wrap" | "nowrap"
+      sizingHorizontal?: "FIXED" | "HUG" | "FILL"
+      sizingVertical?: "FIXED" | "HUG" | "FILL"
+    }
+    constraints?: {
+      horizontal: string
+      vertical: string
+    }
   }
   styles?: {
     backgroundColor?: string
@@ -86,6 +102,14 @@ export interface LayerDetail {
     colorToken?: { id: string; name: string }
   } | null
   code?: { css?: string; tailwind?: string; react?: string }
+  component?: {
+    kind: "COMPONENT" | "INSTANCE" | "COMPONENT_SET"
+    name: string
+    mainComponentName?: string
+    componentSetName?: string
+    variantProperties?: Record<string, string>
+    componentProperties?: Record<string, string>
+  }
 }
 
 export type CodeFormat = "css" | "tailwind" | "react"
@@ -95,6 +119,7 @@ export interface LayerSpecs {
   styles?: LayerDetail["styles"]
   typography?: LayerDetail["typography"]
   code?: Partial<NonNullable<LayerDetail["code"]>>
+  component?: LayerDetail["component"]
 }
 
 export interface SpecLayer {
@@ -107,5 +132,6 @@ export interface SpecLayer {
   width?: number
   height?: number
   sort_order?: number
+  figma_node_id?: string
   specs: LayerSpecs | null
 }

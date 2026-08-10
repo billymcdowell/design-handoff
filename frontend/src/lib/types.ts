@@ -56,6 +56,8 @@ export interface Frame extends RecordModel {
   image?: string
   image_url?: string
   figma_url?: string
+  /** Figma page name the screen was published from. */
+  page_name?: string
   sort_order?: number
   expand?: {
     project?: Project
@@ -74,6 +76,8 @@ export interface Layer extends RecordModel {
   height?: number
   clickable?: boolean
   sort_order?: number
+  /** Raw Figma node id for deep links. */
+  figma_node_id?: string
 }
 
 export interface LayerDetail extends RecordModel {
@@ -83,6 +87,20 @@ export interface LayerDetail extends RecordModel {
     dimensions?: { width: number; height: number }
     padding?: { top: number; right: number; bottom: number; left: number }
     margin?: { top: number; right: number; bottom: number; left: number }
+    autoLayout?: {
+      mode: "NONE" | "HORIZONTAL" | "VERTICAL" | "GRID"
+      direction?: "row" | "column"
+      gap?: string
+      justifyContent?: string
+      alignItems?: string
+      wrap?: "wrap" | "nowrap"
+      sizingHorizontal?: "FIXED" | "HUG" | "FILL"
+      sizingVertical?: "FIXED" | "HUG" | "FILL"
+    }
+    constraints?: {
+      horizontal: string
+      vertical: string
+    }
   }
   styles?: {
     backgroundColor?: string
@@ -118,6 +136,14 @@ export interface LayerDetail extends RecordModel {
     colorToken?: { id: string; name: string }
   } | null
   code?: { css?: string; tailwind?: string; react?: string }
+  component?: {
+    kind: "COMPONENT" | "INSTANCE" | "COMPONENT_SET"
+    name: string
+    mainComponentName?: string
+    componentSetName?: string
+    variantProperties?: Record<string, string>
+    componentProperties?: Record<string, string>
+  }
 }
 
 export interface Foundation extends RecordModel {

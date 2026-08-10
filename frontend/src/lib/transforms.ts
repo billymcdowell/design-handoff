@@ -1,11 +1,16 @@
 import type { Layer, LayerDetail } from "./types"
 
 export type TransformedLayerDetail = {
+  name: string
+  type: string
+  figmaNodeId?: string
   layout: {
     position: { x: number; y: number }
     dimensions: { width: number; height: number }
     padding?: { top: number; right: number; bottom: number; left: number }
     margin?: { top: number; right: number; bottom: number; left: number }
+    autoLayout?: NonNullable<NonNullable<LayerDetail["layout"]>["autoLayout"]>
+    constraints?: NonNullable<NonNullable<LayerDetail["layout"]>["constraints"]>
   }
   styles: {
     backgroundColor?: string
@@ -31,10 +36,14 @@ export type TransformedLayerDetail = {
     letterSpacing: string
     color: string
     textAlign: string
+    textDecoration?: string
+    textTransform?: string
+    characters?: string
     textStyle?: { id: string; name: string }
     colorToken?: { id: string; name: string }
   }
   code: { css: string; tailwind: string; react: string }
+  component?: NonNullable<LayerDetail["component"]>
 }
 
 export function transformLayerDetail(
@@ -49,6 +58,9 @@ export function transformLayerDetail(
   const codeData = layerDetail?.code || {}
 
   return {
+    name: layer.name,
+    type: layer.type,
+    figmaNodeId: layer.figma_node_id,
     layout: {
       position: { x: layer.x || 0, y: layer.y || 0 },
       dimensions: { width: layer.width || 0, height: layer.height || 0 },
@@ -68,6 +80,8 @@ export function transformLayerDetail(
             left: layoutData.margin.left || 0,
           }
         : undefined,
+      autoLayout: layoutData.autoLayout,
+      constraints: layoutData.constraints,
     },
     styles: {
       backgroundColor: stylesData.backgroundColor,
@@ -90,6 +104,13 @@ export function transformLayerDetail(
           letterSpacing: typographyData.letterSpacing || "",
           color: typographyData.color || "",
           textAlign: typographyData.textAlign || "",
+          textDecoration: typographyData.textDecoration,
+          textTransform: typographyData.textTransform,
+          characters:
+            typographyData.characters ||
+            typographyData.text ||
+            typographyData.content ||
+            typographyData.value,
           textStyle: typographyData.textStyle,
           colorToken: typographyData.colorToken,
         }
@@ -99,5 +120,6 @@ export function transformLayerDetail(
       tailwind: codeData.tailwind || "",
       react: codeData.react || "",
     },
+    component: layerDetail?.component,
   }
 }

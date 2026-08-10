@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   Check,
   Clock,
+  ExternalLink,
   Layers as LayersIcon,
   Link2,
   MessageSquarePlus,
@@ -35,6 +36,7 @@ import { frameImageSrc } from "@/lib/files"
 import { frameUploaderLabel } from "@/lib/frame-utils"
 import { copyToClipboard } from "@/lib/clipboard"
 import { copyShareLink, frameShareUrl } from "@/lib/share"
+import { resolveFrameFigmaUrl } from "@/lib/figma-url"
 import { toast } from "@/lib/toast"
 import { useIsMobile } from "@/hooks/use-mobile"
 import type { Frame, Layer } from "@/lib/types"
@@ -403,6 +405,12 @@ export default function FrameViewerPage({
 
   const hoveredPadding = hoveredLayer ? layerDetailsMap[hoveredLayer.id]?.padding : undefined
   const uploaderLabel = frameUploaderLabel(frame)
+  const figmaFileUrl =
+    frame.expand?.project?.figma_file_url || frame.figma_url
+  const openInFigmaUrl = resolveFrameFigmaUrl(
+    frame.figma_url,
+    frame.expand?.project?.figma_file_url,
+  )
 
   return (
     <div className="flex h-svh flex-col">
@@ -419,14 +427,28 @@ export default function FrameViewerPage({
         <LayersIcon className="text-muted-foreground size-4" />
         <div className="min-w-0">
           <span className="block truncate text-sm font-medium">{frame.name}</span>
-          {uploaderLabel && (
+          {(frame.page_name || uploaderLabel) && (
             <span className="text-muted-foreground block truncate text-xs">
-              Uploaded by {uploaderLabel}
+              {[frame.page_name, uploaderLabel ? `Uploaded by ${uploaderLabel}` : null]
+                .filter(Boolean)
+                .join(" · ")}
             </span>
           )}
         </div>
 
         <div className="ml-auto flex items-center gap-2">
+          {openInFigmaUrl && (
+            <Button
+              variant="outline"
+              size="sm"
+              render={
+                <a href={openInFigmaUrl} target="_blank" rel="noopener noreferrer" />
+              }
+            >
+              <ExternalLink className="size-4" />
+              Figma
+            </Button>
+          )}
           <Button
             variant="outline"
             size="sm"
@@ -667,14 +689,13 @@ export default function FrameViewerPage({
         {/* Inspector — desktop right sidebar */}
         {selectedLayer && !isMobile && (
           <aside className="bg-background flex w-80 shrink-0 flex-col border-l">
-            <div className="flex items-center justify-between border-b px-4 py-3">
-              <span className="truncate text-sm font-medium">{selectedLayer.name}</span>
+            <div className="flex items-center justify-end border-b px-2 py-1">
               <Button variant="ghost" size="icon" onClick={() => setSelectedLayer(null)}>
                 <X className="size-4" />
               </Button>
             </div>
             <ScrollArea className="flex-1">
-              <Inspector layerId={selectedLayer.id} />
+              <Inspector layerId={selectedLayer.id} figmaFileUrl={figmaFileUrl} />
             </ScrollArea>
           </aside>
         )}
@@ -688,7 +709,9 @@ export default function FrameViewerPage({
               <DrawerTitle>{selectedLayer?.name}</DrawerTitle>
             </DrawerHeader>
             <div className="min-h-0 flex-1 overflow-auto">
-              {selectedLayer && <Inspector layerId={selectedLayer.id} />}
+              {selectedLayer && (
+                <Inspector layerId={selectedLayer.id} figmaFileUrl={figmaFileUrl} />
+              )}
             </div>
           </DrawerContent>
         </Drawer>

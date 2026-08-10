@@ -1,13 +1,21 @@
 import { useMemo, useState } from "react"
-import { Copy, Check } from "lucide-react"
+import { Copy, Check, ExternalLink } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useLayerInspector } from "@/hooks/data"
 import { transformLayerDetail, type TransformedLayerDetail } from "@/lib/transforms"
 import { copyToClipboard } from "@/lib/clipboard"
+import { buildFigmaNodeUrl } from "@/lib/figma-url"
 
-export function Inspector({ layerId }: { layerId: string }) {
+export function Inspector({
+  layerId,
+  figmaFileUrl,
+}: {
+  layerId: string
+  /** Project or frame Figma URL used to build layer deep links. */
+  figmaFileUrl?: string
+}) {
   const { data, isLoading } = useLayerInspector(layerId)
   const layer = useMemo(
     () => (data?.layer ? transformLayerDetail(data.layer, data.detail) : null),
@@ -25,43 +33,114 @@ export function Inspector({ layerId }: { layerId: string }) {
   }
   if (!layer) return null
 
+  const layerFigmaUrl = buildFigmaNodeUrl(figmaFileUrl, layer.figmaNodeId)
+
   return (
-    <Tabs defaultValue="layout" className="w-full min-w-0">
-      <TabsList className="border-border h-10 w-full justify-start overflow-x-auto rounded-none border-b bg-transparent px-4">
-        <TabsTrigger value="layout" className="shrink-0 text-xs">
-          Layout
-        </TabsTrigger>
-        <TabsTrigger value="style" className="shrink-0 text-xs">
-          Style
-        </TabsTrigger>
-        {layer.typography && (
-          <TabsTrigger value="typography" className="shrink-0 text-xs">
-            Type
+    <div className="w-full min-w-0">
+      <div className="space-y-2 border-b px-4 py-3">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className="truncate text-sm font-medium">{layer.name}</p>
+            <p className="text-muted-foreground truncate font-mono text-xs">{layer.type}</p>
+          </div>
+          {layerFigmaUrl && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="shrink-0"
+              render={
+                <a href={layerFigmaUrl} target="_blank" rel="noopener noreferrer" />
+              }
+            >
+              <ExternalLink className="size-3.5" />
+              Figma
+            </Button>
+          )}
+        </div>
+        {layer.component && <ComponentSummary component={layer.component} />}
+      </div>
+
+      <Tabs defaultValue="layout" className="w-full min-w-0">
+        <TabsList className="border-border h-10 w-full justify-start overflow-x-auto rounded-none border-b bg-transparent px-4">
+          <TabsTrigger value="layout" className="shrink-0 text-xs">
+            Layout
           </TabsTrigger>
-        )}
-        <TabsTrigger value="code" className="shrink-0 text-xs">
-          Code
-        </TabsTrigger>
-      </TabsList>
-      <TabsContent value="layout" className="mt-0 space-y-4 p-4">
-        <LayoutTab layer={layer} />
-      </TabsContent>
-      <TabsContent value="style" className="mt-0 space-y-4 p-4">
-        <StyleTab layer={layer} />
-      </TabsContent>
-      {layer.typography && (
-        <TabsContent value="typography" className="mt-0 space-y-4 p-4">
-          <TypographyTab typography={layer.typography} />
+          <TabsTrigger value="style" className="shrink-0 text-xs">
+            Style
+          </TabsTrigger>
+          {layer.typography && (
+            <TabsTrigger value="typography" className="shrink-0 text-xs">
+              Type
+            </TabsTrigger>
+          )}
+          <TabsTrigger value="code" className="shrink-0 text-xs">
+            Code
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="layout" className="mt-0 space-y-4 p-4">
+          <LayoutTab layer={layer} />
         </TabsContent>
+        <TabsContent value="style" className="mt-0 space-y-4 p-4">
+          <StyleTab layer={layer} />
+        </TabsContent>
+        {layer.typography && (
+          <TabsContent value="typography" className="mt-0 space-y-4 p-4">
+            <TypographyTab typography={layer.typography} />
+          </TabsContent>
+        )}
+        <TabsContent value="code" className="mt-0 space-y-4 p-4">
+          <CodeTab code={layer.code} />
+        </TabsContent>
+      </Tabs>
+    </div>
+  )
+}
+
+function ComponentSummary({
+  component,
+}: {
+  component: NonNullable<TransformedLayerDetail["component"]>
+}) {
+  const title =
+    component.componentSetName ||
+    component.mainComponentName ||
+    component.name
+  const variants = component.variantProperties
+    ? Object.entries(component.variantProperties)
+    : []
+
+  return (
+    <div className="bg-muted/50 space-y-1.5 rounded-md px-3 py-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-muted-foreground text-xs">Component</span>
+        <span className="font-mono text-xs">{component.kind}</span>
+      </div>
+      <p className="truncate text-sm font-medium">{title}</p>
+      {component.mainComponentName &&
+        component.mainComponentName !== title && (
+          <p className="text-muted-foreground truncate text-xs">
+            {component.mainComponentName}
+          </p>
+        )}
+      {variants.length > 0 && (
+        <div className="flex flex-wrap gap-1 pt-0.5">
+          {variants.map(([key, value]) => (
+            <span
+              key={key}
+              className="bg-background text-muted-foreground rounded border px-1.5 py-0.5 font-mono text-[10px]"
+            >
+              {key}={value}
+            </span>
+          ))}
+        </div>
       )}
-      <TabsContent value="code" className="mt-0 space-y-4 p-4">
-        <CodeTab code={layer.code} />
-      </TabsContent>
-    </Tabs>
+    </div>
   )
 }
 
 function LayoutTab({ layer }: { layer: TransformedLayerDetail }) {
+  const auto = layer.layout.autoLayout
+  const constraints = layer.layout.constraints
   return (
     <div className="space-y-4">
       <Section title="Position">
@@ -76,6 +155,42 @@ function LayoutTab({ layer }: { layer: TransformedLayerDetail }) {
           <PropertyItem label="H" value={`${layer.layout.dimensions.height}px`} />
         </div>
       </Section>
+      {auto && (
+        <Section title="Auto Layout">
+          <div className="space-y-2">
+            <PropertyItem label="Mode" value={auto.mode} />
+            {auto.direction && (
+              <PropertyItem label="Direction" value={auto.direction} />
+            )}
+            {auto.gap && <PropertyItem label="Gap" value={auto.gap} />}
+            {auto.justifyContent && (
+              <PropertyItem label="Justify" value={auto.justifyContent} />
+            )}
+            {auto.alignItems && (
+              <PropertyItem label="Align" value={auto.alignItems} />
+            )}
+            {auto.wrap && <PropertyItem label="Wrap" value={auto.wrap} />}
+            {(auto.sizingHorizontal || auto.sizingVertical) && (
+              <div className="grid grid-cols-2 gap-2">
+                {auto.sizingHorizontal && (
+                  <PropertyItem label="H sizing" value={auto.sizingHorizontal} />
+                )}
+                {auto.sizingVertical && (
+                  <PropertyItem label="V sizing" value={auto.sizingVertical} />
+                )}
+              </div>
+            )}
+          </div>
+        </Section>
+      )}
+      {constraints && (
+        <Section title="Constraints">
+          <div className="grid grid-cols-2 gap-2">
+            <PropertyItem label="Horizontal" value={constraints.horizontal} />
+            <PropertyItem label="Vertical" value={constraints.vertical} />
+          </div>
+        </Section>
+      )}
       {layer.layout.padding && (
         <Section title="Padding">
           <div className="grid grid-cols-4 gap-2">
@@ -210,6 +325,13 @@ function TypographyTab({
       {typography.textStyle && (
         <TokenLabel label="Text Style" name={typography.textStyle.name} />
       )}
+      {typography.characters && (
+        <Section title="Content">
+          <div className="bg-muted/50 rounded-md px-3 py-2">
+            <p className="text-sm whitespace-pre-wrap break-words">{typography.characters}</p>
+          </div>
+        </Section>
+      )}
       <PropertyItem label="Font Family" value={typography.fontFamily} />
       <div className="grid grid-cols-2 gap-2">
         <PropertyItem label="Size" value={typography.fontSize} />
@@ -234,6 +356,12 @@ function TypographyTab({
         </div>
       </Section>
       <PropertyItem label="Text Align" value={typography.textAlign} />
+      {typography.textDecoration && typography.textDecoration !== "none" && (
+        <PropertyItem label="Decoration" value={typography.textDecoration} />
+      )}
+      {typography.textTransform && typography.textTransform !== "none" && (
+        <PropertyItem label="Transform" value={typography.textTransform} />
+      )}
     </div>
   )
 }
