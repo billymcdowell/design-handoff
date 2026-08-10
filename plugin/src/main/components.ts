@@ -256,12 +256,17 @@ async function exportPreview(node: SceneNode): Promise<Uint8Array> {
 }
 
 function variantPropertiesOf(component: ComponentNode): Record<string, string> {
-  if (!component.variantProperties) return {}
-  const out: Record<string, string> = {}
-  for (const [k, v] of Object.entries(component.variantProperties)) {
-    out[k] = String(v)
+  // Figma throws when the parent COMPONENT_SET has existing errors.
+  try {
+    if (!component.variantProperties) return {}
+    const out: Record<string, string> = {}
+    for (const [k, v] of Object.entries(component.variantProperties)) {
+      out[k] = String(v)
+    }
+    return out
+  } catch {
+    return {}
   }
-  return out
 }
 
 function computeContentHash(args: {
@@ -295,16 +300,32 @@ async function extractOne(
   let variants: LibraryComponentVariant[] = []
   let previewNode: SceneNode = node
 
+  let nodeKey: string
+  try {
+    nodeKey = node.key
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    throw new Error(`Cannot read key for “${node.name}”: ${message}`)
+  }
+
   if (node.type === "COMPONENT_SET") {
     const children = node.children.filter(
       (c): c is ComponentNode => c.type === "COMPONENT",
     )
-    variants = children.map((c) => ({
-      key: c.key,
-      name: c.name,
-      properties: variantPropertiesOf(c),
-      figma_node_id: c.id,
-    }))
+    variants = children.map((c) => {
+      let childKey = ""
+      try {
+        childKey = c.key
+      } catch {
+        childKey = c.id
+      }
+      return {
+        key: childKey,
+        name: c.name,
+        properties: variantPropertiesOf(c),
+        figma_node_id: c.id,
+      }
+    })
     try {
       const def = node.defaultVariant
       if (def) previewNode = def
@@ -315,7 +336,7 @@ async function extractOne(
   } else {
     variants = [
       {
-        key: node.key,
+        key: nodeKey,
         name: node.name,
         properties: variantPropertiesOf(node),
         figma_node_id: node.id,
@@ -335,7 +356,7 @@ async function extractOne(
   })
 
   return {
-    key: node.key,
+    key: nodeKey,
     name: node.name,
     kind,
     figma_node_id: node.id,
@@ -344,7 +365,7 @@ async function extractOne(
     tokens_used,
     content_hash,
     previewBytes,
-    previewFileName: `${node.key.slice(0, 24)}.png`,
+    previewFileName: `${nodeKey.slice(0, 24)}.png`,
   }
 }
 

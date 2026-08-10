@@ -906,99 +906,126 @@ export function extractConstraintsSpec(
   }
 }
 
+/**
+ * Read variantProperties safely. Figma throws
+ * "in get_variant_properties: component set for node has existing errors"
+ * when the parent COMPONENT_SET is broken (missing variants, conflicting props).
+ */
+function safeVariantProperties(
+  node: ComponentNode | InstanceNode,
+): Record<string, string> | undefined {
+  try {
+    const props = node.variantProperties
+    if (!props || Object.keys(props).length === 0) return undefined
+    const out: Record<string, string> = {}
+    for (const [key, value] of Object.entries(props)) {
+      out[key] = String(value)
+    }
+    return out
+  } catch {
+    return undefined
+  }
+}
+
+function safeComponentKey(node: ComponentNode | ComponentSetNode): string | undefined {
+  try {
+    return node.key
+  } catch {
+    return undefined
+  }
+}
+
 export async function extractComponentSpec(
   node: SceneNode,
 ): Promise<ComponentSpec | undefined> {
-  if (node.type === "COMPONENT") {
-    const component = node as ComponentNode
-    let componentSetName: string | undefined
-    let componentSetKey: string | undefined
-    let componentSetId: string | undefined
-    try {
-      const parent = component.parent
-      if (parent && parent.type === "COMPONENT_SET") {
-        componentSetName = parent.name
-        componentSetKey = parent.key
-        componentSetId = parent.id
-      }
-    } catch {
-      /* ignore */
-    }
-    const variantProperties =
-      "variantProperties" in component && component.variantProperties
-        ? { ...component.variantProperties }
-        : undefined
-    return {
-      kind: "COMPONENT",
-      name: component.name,
-      componentKey: component.key,
-      ...(componentSetName ? { componentSetName } : {}),
-      ...(componentSetKey ? { componentSetKey } : {}),
-      ...(componentSetId ? { componentSetId } : {}),
-      ...(variantProperties && Object.keys(variantProperties).length > 0
-        ? { variantProperties }
-        : {}),
-    }
-  }
-
-  if (node.type === "INSTANCE") {
-    const instance = node as InstanceNode
-    let mainComponentName: string | undefined
-    let mainComponentKey: string | undefined
-    let mainComponentId: string | undefined
-    let componentSetName: string | undefined
-    let componentSetKey: string | undefined
-    let componentSetId: string | undefined
-    try {
-      const main = await instance.getMainComponentAsync()
-      if (main) {
-        mainComponentName = main.name
-        mainComponentKey = main.key
-        mainComponentId = main.id
-        const parent = main.parent
+  try {
+    if (node.type === "COMPONENT") {
+      const component = node as ComponentNode
+      let componentSetName: string | undefined
+      let componentSetKey: string | undefined
+      let componentSetId: string | undefined
+      try {
+        const parent = component.parent
         if (parent && parent.type === "COMPONENT_SET") {
           componentSetName = parent.name
-          componentSetKey = parent.key
+          componentSetKey = safeComponentKey(parent)
           componentSetId = parent.id
         }
+      } catch {
+        /* ignore */
       }
-    } catch {
-      /* ignore */
+      const variantProperties = safeVariantProperties(component)
+      const componentKey = safeComponentKey(component)
+      return {
+        kind: "COMPONENT",
+        name: component.name,
+        ...(componentKey ? { componentKey } : {}),
+        ...(componentSetName ? { componentSetName } : {}),
+        ...(componentSetKey ? { componentSetKey } : {}),
+        ...(componentSetId ? { componentSetId } : {}),
+        ...(variantProperties ? { variantProperties } : {}),
+      }
     }
 
-    const variantProperties =
-      instance.variantProperties && Object.keys(instance.variantProperties).length > 0
-        ? { ...instance.variantProperties }
-        : undefined
-
-    const componentProperties: Record<string, string> = {}
-    try {
-      const props = instance.componentProperties
-      for (const [key, value] of Object.entries(props)) {
-        if (value.type === "TEXT" || value.type === "BOOLEAN") {
-          componentProperties[key] = String(value.value)
-        } else if (value.type === "VARIANT") {
-          componentProperties[key] = String(value.value)
+    if (node.type === "INSTANCE") {
+      const instance = node as InstanceNode
+      let mainComponentName: string | undefined
+      let mainComponentKey: string | undefined
+      let mainComponentId: string | undefined
+      let componentSetName: string | undefined
+      let componentSetKey: string | undefined
+      let componentSetId: string | undefined
+      try {
+        const main = await instance.getMainComponentAsync()
+        if (main) {
+          mainComponentName = main.name
+          mainComponentKey = safeComponentKey(main)
+          mainComponentId = main.id
+          const parent = main.parent
+          if (parent && parent.type === "COMPONENT_SET") {
+            componentSetName = parent.name
+            componentSetKey = safeComponentKey(parent)
+            componentSetId = parent.id
+          }
         }
+      } catch {
+        /* ignore */
       }
-    } catch {
-      /* ignore */
-    }
 
-    return {
-      kind: "INSTANCE",
-      name: instance.name,
-      ...(mainComponentName ? { mainComponentName } : {}),
-      ...(mainComponentKey ? { mainComponentKey } : {}),
-      ...(mainComponentId ? { mainComponentId } : {}),
-      ...(componentSetName ? { componentSetName } : {}),
-      ...(componentSetKey ? { componentSetKey } : {}),
-      ...(componentSetId ? { componentSetId } : {}),
-      ...(variantProperties ? { variantProperties } : {}),
-      ...(Object.keys(componentProperties).length > 0
-        ? { componentProperties }
-        : {}),
+      const variantProperties = safeVariantProperties(instance)
+
+      const componentProperties: Record<string, string> = {}
+      try {
+        const props = instance.componentProperties
+        for (const [key, value] of Object.entries(props)) {
+          if (value.type === "TEXT" || value.type === "BOOLEAN") {
+            componentProperties[key] = String(value.value)
+          } else if (value.type === "VARIANT") {
+            componentProperties[key] = String(value.value)
+          }
+        }
+      } catch {
+        /* ignore broken / incomplete component property definitions */
+      }
+
+      return {
+        kind: "INSTANCE",
+        name: instance.name,
+        ...(mainComponentName ? { mainComponentName } : {}),
+        ...(mainComponentKey ? { mainComponentKey } : {}),
+        ...(mainComponentId ? { mainComponentId } : {}),
+        ...(componentSetName ? { componentSetName } : {}),
+        ...(componentSetKey ? { componentSetKey } : {}),
+        ...(componentSetId ? { componentSetId } : {}),
+        ...(variantProperties ? { variantProperties } : {}),
+        ...(Object.keys(componentProperties).length > 0
+          ? { componentProperties }
+          : {}),
+      }
     }
+  } catch {
+    // Never fail publish because component metadata is unavailable.
+    return undefined
   }
 
   return undefined
