@@ -5,6 +5,7 @@
 import type {
   FoundationalExport,
   FoundationalStyles,
+  FoundationAliasStep,
   FoundationCategory,
   FoundationHistoryChangedItem,
   FoundationHistoryEntry,
@@ -12,6 +13,7 @@ import type {
   FoundationHistoryItemRef,
   FoundationHistorySummary,
   FoundationNumberKind,
+  FoundationResolvedModeValue,
   FoundationSemanticValue,
   FoundationSource,
   FoundationsStoredData,
@@ -387,6 +389,11 @@ export function buildSourceTokens(
       if (first?.kind === "color") css = first.css
       if (first?.kind === "number") css = `${first.value}px`
 
+      const codeSyntax =
+        variable.codeSyntax && Object.keys(variable.codeSyntax).length > 0
+          ? variable.codeSyntax
+          : undefined
+
       tokens[variable.id] = {
         id: variable.id,
         name: variable.name,
@@ -397,6 +404,7 @@ export function buildSourceTokens(
         origin: "variable",
         collectionName: collection.name,
         description: variable.description || undefined,
+        ...(codeSyntax ? { codeSyntax } : {}),
         modes: collection.modes,
         valuesByMode,
         ...(css ? { css } : {}),
@@ -532,7 +540,176 @@ export function buildSourceTokens(
 
 // ── Catalog flatten ─────────────────────────────────────────────────────────
 
-/** Rebuild flat catalog from all sources; prefix colliding names across files. */
+const ALIAS_MAX_DEPTH = 20
+
+/** Look up a token by Figma id, including namespaced catalog keys. */
+export function findCatalogToken(
+  catalog: Record<string, FoundationToken>,
+  figmaId: string,
+): FoundationToken | null {
+  if (!figmaId) return null
+  const direct = catalog[figmaId]
+  if (direct) return direct
+  for (const token of Object.values(catalog)) {
+    if (token.sourceId === figmaId || token.id === figmaId) return token
+  }
+  for (const [key, token] of Object.entries(catalog)) {
+    if (key.endsWith(`:${figmaId}`)) return token
+  }
+  return null
+}
+
+function pickModeValue(
+  token: FoundationToken,
+  preferredModeId: string | null,
+  preferredModeName: string | null,
+): FoundationSemanticValue | undefined {
+  const values = token.valuesByMode
+  if (values) {
+    if (preferredModeId && values[preferredModeId]) {
+      return values[preferredModeId]
+    }
+    if (preferredModeName && token.modes) {
+      const match = token.modes.find((m) => m.name === preferredModeName)
+      if (match && values[match.modeId]) return values[match.modeId]
+    }
+    const first = Object.values(values)[0]
+    if (first) return first
+  }
+  return token.value
+}
+
+function cssFromSemantic(value: FoundationSemanticValue | undefined): string | undefined {
+  if (!value) return undefined
+  switch (value.kind) {
+    case "color":
+      return value.css || value.hex
+    case "paint":
+      return value.css ? `background-color: ${value.css}` : undefined
+    case "number":
+      return `${value.value}px`
+    case "shadow":
+    case "shadows":
+      return undefined
+    default:
+      return undefined
+  }
+}
+
+/**
+ * Walk alias chains across the merged catalog. Mode ids are matched by name
+ * when jumping between collections/files.
+ */
+export function resolveSemanticValue(
+  catalog: Record<string, FoundationToken>,
+  start: FoundationSemanticValue | undefined,
+  preferredModeId: string | null,
+  preferredModeName: string | null,
+): FoundationResolvedModeValue | undefined {
+  if (!start) return undefined
+  if (start.kind !== "alias") {
+    return { value: start, aliasChain: [] }
+  }
+
+  const aliasChain: FoundationAliasStep[] = []
+  let current: FoundationSemanticValue = start
+  let modeId = preferredModeId
+  let modeName = preferredModeName
+  const visited = new Set<string>()
+
+  for (let depth = 0; depth < ALIAS_MAX_DEPTH; depth += 1) {
+    if (current.kind !== "alias") {
+      return { value: current, aliasChain }
+    }
+    const aliasId = current.aliasId
+    if (visited.has(aliasId)) {
+      return { value: current, aliasChain, unresolved: true }
+    }
+    visited.add(aliasId)
+    aliasChain.push({ id: aliasId, name: current.aliasName })
+
+    const target = findCatalogToken(catalog, aliasId)
+    if (!target) {
+      return { value: current, aliasChain, unresolved: true }
+    }
+
+    const next = pickModeValue(target, modeId, modeName)
+    if (!next) {
+      return { value: current, aliasChain, unresolved: true }
+    }
+
+    // Prefer continuing with the target's matched mode for deeper hops.
+    if (modeName && target.modes) {
+      const match = target.modes.find((m) => m.name === modeName)
+      if (match) modeId = match.modeId
+    } else if (target.modes && target.modes.length > 0) {
+      const match =
+        (modeId && target.modes.find((m) => m.modeId === modeId)) ||
+        target.modes[0]
+      modeId = match.modeId
+      modeName = match.name
+    }
+
+    current = next
+  }
+
+  return { value: current, aliasChain, unresolved: true }
+}
+
+/** Attach resolvedByMode / resolved on every catalog token. */
+export function applyCatalogResolution(
+  catalog: Record<string, FoundationToken>,
+): Record<string, FoundationToken> {
+  const out: Record<string, FoundationToken> = {}
+
+  for (const [id, token] of Object.entries(catalog)) {
+    const resolvedByMode: Record<string, FoundationResolvedModeValue> = {}
+    if (token.valuesByMode && token.modes && token.modes.length > 0) {
+      for (const mode of token.modes) {
+        const raw = token.valuesByMode[mode.modeId]
+        const resolved = resolveSemanticValue(
+          catalog,
+          raw,
+          mode.modeId,
+          mode.name,
+        )
+        if (resolved) resolvedByMode[mode.modeId] = resolved
+      }
+    } else if (token.valuesByMode) {
+      for (const [modeId, raw] of Object.entries(token.valuesByMode)) {
+        const modeName =
+          token.modes?.find((m) => m.modeId === modeId)?.name ?? null
+        const resolved = resolveSemanticValue(catalog, raw, modeId, modeName)
+        if (resolved) resolvedByMode[modeId] = resolved
+      }
+    }
+
+    let resolved: FoundationResolvedModeValue | undefined
+    if (token.value) {
+      resolved = resolveSemanticValue(catalog, token.value, null, null)
+    } else if (Object.keys(resolvedByMode).length > 0) {
+      resolved = Object.values(resolvedByMode)[0]
+    }
+
+    const leaf = resolved?.unresolved ? undefined : resolved?.value
+    const derivedCss = cssFromSemantic(leaf)
+
+    out[id] = {
+      ...token,
+      ...(Object.keys(resolvedByMode).length > 0 ? { resolvedByMode } : {}),
+      ...(resolved ? { resolved } : {}),
+      ...(derivedCss ? { css: derivedCss } : token.css ? { css: token.css } : {}),
+    }
+  }
+
+  return out
+}
+
+/**
+ * Rebuild flat catalog from all sources; prefix colliding *display names*
+ * across files. Catalog keys are always Figma variable/style ids (never names),
+ * so a rename updates the same token entry instead of creating a duplicate.
+ */
 export function flattenCatalog(
   sources: Record<string, FoundationSource>,
 ): Record<string, FoundationToken> {
@@ -553,21 +730,23 @@ export function flattenCatalog(
       const displayName = collided
         ? `${source.fileName} / ${token.name}`
         : token.name
+      const originalId = token.sourceId ?? token.id
       // Catalog key: keep token id; if same Figma id appears in two files (rare),
       // namespace with fileKey.
       const catalogId =
-        catalog[token.id] && catalog[token.id].sourceFileKey !== source.fileKey
-          ? `${source.fileKey}:${token.id}`
-          : token.id
+        catalog[originalId] && catalog[originalId].sourceFileKey !== source.fileKey
+          ? `${source.fileKey}:${originalId}`
+          : originalId
       catalog[catalogId] = {
         ...token,
         id: catalogId,
         name: displayName,
+        ...(catalogId !== originalId ? { sourceId: originalId } : {}),
       }
     }
   }
 
-  return catalog
+  return applyCatalogResolution(catalog)
 }
 
 export function countCatalogTokens(catalog: Record<string, FoundationToken>): {

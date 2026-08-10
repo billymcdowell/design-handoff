@@ -1,11 +1,190 @@
 import type {
+  FoundationAliasStep,
   FoundationHistoryEntry,
+  FoundationResolvedModeValue,
+  FoundationSemanticValue,
   FoundationSource,
   FoundationsData,
   FoundationToken,
 } from "@/lib/types"
 
 const HISTORY_CAP = 50
+const ALIAS_MAX_DEPTH = 20
+
+/** Look up a token by Figma id, including namespaced catalog keys. */
+export function findCatalogToken(
+  catalog: Record<string, FoundationToken>,
+  figmaId: string,
+): FoundationToken | null {
+  if (!figmaId) return null
+  const direct = catalog[figmaId]
+  if (direct) return direct
+  for (const token of Object.values(catalog)) {
+    if (token.sourceId === figmaId || token.id === figmaId) return token
+  }
+  for (const [key, token] of Object.entries(catalog)) {
+    if (key.endsWith(`:${figmaId}`)) return token
+  }
+  return null
+}
+
+/**
+ * Resolve an inspector/style id against the catalog.
+ * Effect styles may be stored as `${id}:shadow` / `${id}:blur`.
+ */
+export function resolveTokenIdInCatalog(
+  catalog: Record<string, FoundationToken>,
+  tokenId: string,
+): FoundationToken | null {
+  const direct = findCatalogToken(catalog, tokenId)
+  if (direct) return direct
+  return (
+    findCatalogToken(catalog, `${tokenId}:shadow`) ??
+    findCatalogToken(catalog, `${tokenId}:blur`)
+  )
+}
+
+function pickModeValue(
+  token: FoundationToken,
+  preferredModeId: string | null,
+  preferredModeName: string | null,
+): FoundationSemanticValue | undefined {
+  const values = token.valuesByMode
+  if (values) {
+    if (preferredModeId && values[preferredModeId]) {
+      return values[preferredModeId]
+    }
+    if (preferredModeName && token.modes) {
+      const match = token.modes.find((m) => m.name === preferredModeName)
+      if (match && values[match.modeId]) return values[match.modeId]
+    }
+    const first = Object.values(values)[0]
+    if (first) return first
+  }
+  return token.value
+}
+
+function cssFromSemantic(value: FoundationSemanticValue | undefined): string | undefined {
+  if (!value) return undefined
+  switch (value.kind) {
+    case "color":
+      return value.css || value.hex
+    case "paint":
+      return value.css ? `background-color: ${value.css}` : undefined
+    case "number":
+      return `${value.value}px`
+    default:
+      return undefined
+  }
+}
+
+export function resolveSemanticValue(
+  catalog: Record<string, FoundationToken>,
+  start: FoundationSemanticValue | undefined,
+  preferredModeId: string | null,
+  preferredModeName: string | null,
+): FoundationResolvedModeValue | undefined {
+  if (!start) return undefined
+  if (start.kind !== "alias") {
+    return { value: start, aliasChain: [] }
+  }
+
+  const aliasChain: FoundationAliasStep[] = []
+  let current: FoundationSemanticValue = start
+  let modeId = preferredModeId
+  let modeName = preferredModeName
+  const visited = new Set<string>()
+
+  for (let depth = 0; depth < ALIAS_MAX_DEPTH; depth += 1) {
+    if (current.kind !== "alias") {
+      return { value: current, aliasChain }
+    }
+    const aliasId = current.aliasId
+    if (visited.has(aliasId)) {
+      return { value: current, aliasChain, unresolved: true }
+    }
+    visited.add(aliasId)
+    aliasChain.push({ id: aliasId, name: current.aliasName })
+
+    const target = findCatalogToken(catalog, aliasId)
+    if (!target) {
+      return { value: current, aliasChain, unresolved: true }
+    }
+
+    const next = pickModeValue(target, modeId, modeName)
+    if (!next) {
+      return { value: current, aliasChain, unresolved: true }
+    }
+
+    if (modeName && target.modes) {
+      const match = target.modes.find((m) => m.name === modeName)
+      if (match) modeId = match.modeId
+    } else if (target.modes && target.modes.length > 0) {
+      const match =
+        (modeId && target.modes.find((m) => m.modeId === modeId)) ||
+        target.modes[0]
+      modeId = match.modeId
+      modeName = match.name
+    }
+
+    current = next
+  }
+
+  return { value: current, aliasChain, unresolved: true }
+}
+
+export function applyCatalogResolution(
+  catalog: Record<string, FoundationToken>,
+): Record<string, FoundationToken> {
+  const out: Record<string, FoundationToken> = {}
+
+  for (const [id, token] of Object.entries(catalog)) {
+    if (token.resolvedByMode || token.resolved) {
+      out[id] = token
+      continue
+    }
+
+    const resolvedByMode: Record<string, FoundationResolvedModeValue> = {}
+    if (token.valuesByMode && token.modes && token.modes.length > 0) {
+      for (const mode of token.modes) {
+        const raw = token.valuesByMode[mode.modeId]
+        const resolved = resolveSemanticValue(
+          catalog,
+          raw,
+          mode.modeId,
+          mode.name,
+        )
+        if (resolved) resolvedByMode[mode.modeId] = resolved
+      }
+    } else if (token.valuesByMode) {
+      for (const [modeId, raw] of Object.entries(token.valuesByMode)) {
+        const modeName =
+          token.modes?.find((m) => m.modeId === modeId)?.name ?? null
+        const resolved = resolveSemanticValue(catalog, raw, modeId, modeName)
+        if (resolved) resolvedByMode[modeId] = resolved
+      }
+    }
+
+    let resolved: FoundationResolvedModeValue | undefined
+    if (token.value) {
+      resolved = resolveSemanticValue(catalog, token.value, null, null)
+    } else if (Object.keys(resolvedByMode).length > 0) {
+      resolved = Object.values(resolvedByMode)[0]
+    }
+
+    const leaf = resolved?.unresolved ? undefined : resolved?.value
+    const derivedCss = cssFromSemantic(leaf)
+
+    out[id] = {
+      ...token,
+      ...(Object.keys(resolvedByMode).length > 0 ? { resolvedByMode } : {}),
+      ...(resolved ? { resolved } : {}),
+      ...(derivedCss ? { css: derivedCss } : token.css ? { css: token.css } : {}),
+    }
+  }
+
+  return out
+}
 
 /** Rebuild flat catalog from all sources (mirrors plugin flattenCatalog). */
 export function flattenCatalog(
@@ -28,19 +207,21 @@ export function flattenCatalog(
       const displayName = collided
         ? `${source.fileName} / ${token.name}`
         : token.name
+      const originalId = token.sourceId ?? token.id
       const catalogId =
-        catalog[token.id] && catalog[token.id].sourceFileKey !== source.fileKey
-          ? `${source.fileKey}:${token.id}`
-          : token.id
+        catalog[originalId] && catalog[originalId].sourceFileKey !== source.fileKey
+          ? `${source.fileKey}:${originalId}`
+          : originalId
       catalog[catalogId] = {
         ...token,
         id: catalogId,
         name: displayName,
+        ...(catalogId !== originalId ? { sourceId: originalId } : {}),
       }
     }
   }
 
-  return catalog
+  return applyCatalogResolution(catalog)
 }
 
 export function countCatalogTokens(catalog: Record<string, FoundationToken>): {
@@ -117,12 +298,39 @@ export function removeFoundationSourceFromData(
   }
 }
 
-export function tokensFromData(data: FoundationsData): FoundationToken[] {
-  const catalog = data.catalog
-  if (catalog && Object.keys(catalog).length > 0) {
-    return Object.values(catalog)
+export function catalogFromData(
+  data: FoundationsData,
+): Record<string, FoundationToken> {
+  if (data.catalog && Object.keys(data.catalog).length > 0) {
+    return applyCatalogResolution(data.catalog)
   }
-  // Fallback: rebuild from sources if catalog missing
-  if (data.sources) return Object.values(flattenCatalog(data.sources))
-  return []
+  if (data.sources) return flattenCatalog(data.sources)
+  return {}
+}
+
+export function tokensFromData(data: FoundationsData): FoundationToken[] {
+  return Object.values(catalogFromData(data))
+}
+
+/** Prefer resolved leaf for display; fall back to raw mode/value. */
+export function displayValueForToken(
+  token: FoundationToken,
+  modeId: string | null,
+): {
+  raw: FoundationSemanticValue | undefined
+  resolved: FoundationResolvedModeValue | undefined
+  leaf: FoundationSemanticValue | undefined
+} {
+  const raw =
+    (modeId && token.valuesByMode?.[modeId]) ||
+    (token.valuesByMode && Object.values(token.valuesByMode)[0]) ||
+    token.value
+
+  const resolved =
+    (modeId && token.resolvedByMode?.[modeId]) ||
+    token.resolved ||
+    (token.resolvedByMode && Object.values(token.resolvedByMode)[0])
+
+  const leaf = resolved && !resolved.unresolved ? resolved.value : raw
+  return { raw, resolved, leaf }
 }

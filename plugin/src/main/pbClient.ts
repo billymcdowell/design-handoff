@@ -703,57 +703,22 @@ export async function createLayerDetailRecord(
   return pbJson<PBRecord>(recordsUrl("layer_details"), "POST", token, fields)
 }
 
-// ─── Foundations (upsert 1:1 with users) ─────────────────────────────────────
+// ─── Foundations (single-tenant singleton, slug=default) ─────────────────────
+
+/** Fixed singleton key for this deploy. */
+export const SHARED_FOUNDATIONS_SLUG = "default"
+
 export interface FoundationFields {
-  owner: string
+  slug: string
   data: unknown
   variables_count: number
   styles_count: number
 }
 
-/**
- * `foundations.owner` is a relation to the `users` collection.
- * Designer tokens already use a `users` id. Admin `_superusers` tokens are
- * mapped to a real `users` id (email match, else an existing project owner).
- */
-export async function resolveFoundationOwnerId(
+export async function findSharedFoundationRecord(
   token: string,
-  auth: Extract<TokenValidation, { ok: true }>,
-): Promise<string> {
-  if (!isSuperuserCollection(auth.collectionName)) return auth.userId
-
-  // 1. Prefer a `users` row with the same email as the Admin.
-  if (auth.email) {
-    const filter = encodeURIComponent(`email = "${auth.email.replace(/"/g, '\\"')}"`)
-    const res = await fetch(
-      recordsUrl("users", undefined, `perPage=1&filter=${filter}`),
-      { headers: { ...authHeaders(token), "Content-Type": "application/json" } },
-    )
-    if (res.ok) {
-      const data = (await res.json()) as PBListResponse<PBRecord>
-      const id = data.items[0]?.id
-      if (typeof id === "string" && id) return id
-    }
-  }
-
-  // 2. Fall back to the owner of an existing project.
-  const projects = await listProjectRecords(token)
-  for (const project of projects) {
-    const owner = project.owner
-    if (typeof owner === "string" && owner) return owner
-  }
-
-  throw new Error(
-    "Admin sessions cannot own foundations directly. Create a designer " +
-      "user (Collections → users, role designer) and sign in with that account.",
-  )
-}
-
-export async function findFoundationRecord(
-  token: string,
-  ownerId: string,
 ): Promise<PBRecord | null> {
-  const filter = encodeURIComponent(`owner = "${ownerId}"`)
+  const filter = encodeURIComponent(`slug = "${SHARED_FOUNDATIONS_SLUG}"`)
   const res = await fetch(
     recordsUrl("foundations", undefined, `perPage=1&filter=${filter}`),
     { headers: { ...authHeaders(token), "Content-Type": "application/json" } },
@@ -763,20 +728,192 @@ export async function findFoundationRecord(
   return data.items[0] ?? null
 }
 
-export async function upsertFoundationRecord(
+/**
+ * Upsert the shared foundations catalog. Creates slug=default on first sync.
+ * Callers should skip this when syncFoundationsData returns no historyEntry.
+ */
+export async function upsertSharedFoundationRecord(
   token: string,
-  fields: FoundationFields,
+  fields: Omit<FoundationFields, "slug">,
 ): Promise<PBRecord> {
-  const existing = await findFoundationRecord(token, fields.owner)
+  const existing = await findSharedFoundationRecord(token)
   if (existing) {
-    // Owner is already set on the existing row; avoid re-validating the relation.
-    const { owner: _owner, ...patch } = fields
     return pbJson<PBRecord>(
       recordsUrl("foundations", existing.id),
       "PATCH",
       token,
-      patch,
+      fields,
     )
   }
-  return pbJson<PBRecord>(recordsUrl("foundations"), "POST", token, fields)
+  return pbJson<PBRecord>(recordsUrl("foundations"), "POST", token, {
+    slug: SHARED_FOUNDATIONS_SLUG,
+    ...fields,
+  })
 }
+
+// ─── Component libraries (singleton meta + library_components rows) ──────────
+
+export const SHARED_COMPONENT_LIBRARIES_SLUG = "default"
+
+export interface ComponentLibraryMetaFields {
+  slug: string
+  data: unknown
+  components_count: number
+}
+
+export async function findSharedComponentLibraryRecord(
+  token: string,
+): Promise<PBRecord | null> {
+  const filter = encodeURIComponent(
+    `slug = "${SHARED_COMPONENT_LIBRARIES_SLUG}"`,
+  )
+  const res = await fetch(
+    recordsUrl("component_libraries", undefined, `perPage=1&filter=${filter}`),
+    { headers: { ...authHeaders(token), "Content-Type": "application/json" } },
+  )
+  if (!res.ok) return null
+  const data = (await res.json()) as PBListResponse<PBRecord>
+  return data.items[0] ?? null
+}
+
+export async function upsertSharedComponentLibraryRecord(
+  token: string,
+  fields: Omit<ComponentLibraryMetaFields, "slug">,
+): Promise<PBRecord> {
+  const existing = await findSharedComponentLibraryRecord(token)
+  if (existing) {
+    return pbJson<PBRecord>(
+      recordsUrl("component_libraries", existing.id),
+      "PATCH",
+      token,
+      fields,
+    )
+  }
+  return pbJson<PBRecord>(recordsUrl("component_libraries"), "POST", token, {
+    slug: SHARED_COMPONENT_LIBRARIES_SLUG,
+    ...fields,
+  })
+}
+
+export interface LibraryComponentFields {
+  key: string
+  name: string
+  kind: "COMPONENT" | "COMPONENT_SET"
+  file_key: string
+  file_name: string
+  figma_node_id?: string
+  variants?: unknown
+  tokens_used?: unknown
+  description?: string
+  content_hash?: string
+}
+
+export async function listLibraryComponentsByFileKey(
+  token: string,
+  fileKey: string,
+): Promise<PBRecord[]> {
+  const filter = encodeURIComponent(
+    `file_key = "${escapeFilterValue(fileKey)}"`,
+  )
+  const items: PBRecord[] = []
+  let page = 1
+  for (;;) {
+    const res = await fetch(
+      recordsUrl(
+        "library_components",
+        undefined,
+        `page=${page}&perPage=200&filter=${filter}`,
+      ),
+      { headers: { ...authHeaders(token), "Content-Type": "application/json" } },
+    )
+    if (!res.ok) throw new Error(await pbErrorMessage(res))
+    const data = (await res.json()) as PBListResponse<PBRecord>
+    items.push(...data.items)
+    if (items.length >= data.totalItems || data.items.length === 0) break
+    page += 1
+  }
+  return items
+}
+
+async function upsertLibraryComponentMultipart(
+  token: string,
+  method: "POST" | "PATCH",
+  url: string,
+  fields: LibraryComponentFields,
+  preview?: { bytes: Uint8Array; fileName: string },
+): Promise<PBRecord> {
+  if (!preview) {
+    return pbJson<PBRecord>(url, method, token, fields as unknown as Record<string, unknown>)
+  }
+
+  const boundary = randomBoundary()
+  const textFields: MultipartField[] = []
+  for (const [key, value] of Object.entries(fields)) {
+    if (value === undefined || value === null) continue
+    const serialized =
+      typeof value === "object" ? JSON.stringify(value) : String(value)
+    textFields.push({ name: key, value: serialized })
+  }
+  const body = buildMultipartBody(boundary, textFields, [
+    {
+      name: "preview",
+      fileName: preview.fileName,
+      contentType: "image/png",
+      bytes: preview.bytes,
+    },
+  ])
+
+  const res = await fetch(url, {
+    method,
+    headers: {
+      ...authHeaders(token),
+      "Content-Type": `multipart/form-data; boundary=${boundary}`,
+    },
+    body: body as unknown as BodyInit,
+  })
+  if (!res.ok) throw new Error(await pbErrorMessage(res))
+  return (await res.json()) as PBRecord
+}
+
+export async function createLibraryComponentRecord(
+  token: string,
+  fields: LibraryComponentFields,
+  preview?: { bytes: Uint8Array; fileName: string },
+): Promise<PBRecord> {
+  return upsertLibraryComponentMultipart(
+    token,
+    "POST",
+    recordsUrl("library_components"),
+    fields,
+    preview,
+  )
+}
+
+export async function updateLibraryComponentRecord(
+  token: string,
+  id: string,
+  fields: LibraryComponentFields,
+  preview?: { bytes: Uint8Array; fileName: string },
+): Promise<PBRecord> {
+  return upsertLibraryComponentMultipart(
+    token,
+    "PATCH",
+    recordsUrl("library_components", id),
+    fields,
+    preview,
+  )
+}
+
+export async function deleteLibraryComponentRecord(
+  token: string,
+  id: string,
+): Promise<void> {
+  const res = await fetch(recordsUrl("library_components", id), {
+    method: "DELETE",
+    headers: { ...authHeaders(token), "Content-Type": "application/json" },
+  })
+  if (!res.ok && res.status !== 404) {
+    throw new Error(await pbErrorMessage(res))
+  }
+}
+

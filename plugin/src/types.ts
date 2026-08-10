@@ -63,7 +63,17 @@ export interface ConstraintsSpec {
 export interface ComponentSpec {
   kind: "COMPONENT" | "INSTANCE" | "COMPONENT_SET"
   name: string
+  /** Figma `node.key` on this COMPONENT (stable for library components). */
+  componentKey?: string
+  /** For instances: key of the resolved main component. */
+  mainComponentKey?: string
+  /** For instances: node id of the resolved main component. */
+  mainComponentId?: string
   mainComponentName?: string
+  /** Figma `node.key` of the parent COMPONENT_SET when applicable. */
+  componentSetKey?: string
+  /** Node id of the parent COMPONENT_SET when applicable. */
+  componentSetId?: string
   componentSetName?: string
   variantProperties?: Record<string, string>
   componentProperties?: Record<string, string>
@@ -270,9 +280,24 @@ export type FoundationSemanticValue =
   | { kind: "grid"; grids: unknown[] }
   | { kind: "unknown"; raw: unknown }
 
+/** One hop in an alias chain (semantic → … → primitive). */
+export interface FoundationAliasStep {
+  id: string
+  name: string
+}
+
+/** Concrete (or unresolved) value after walking aliases for one mode. */
+export interface FoundationResolvedModeValue {
+  value: FoundationSemanticValue
+  aliasChain: FoundationAliasStep[]
+  unresolved?: boolean
+}
+
 export interface FoundationToken {
   id: string
   name: string
+  /** Original Figma variable/style id when catalog key was namespaced. */
+  sourceId?: string
   sourceFileKey: string
   sourceFileName: string
   category: FoundationCategory
@@ -280,9 +305,14 @@ export interface FoundationToken {
   origin: FoundationOrigin
   collectionName?: string
   description?: string
+  codeSyntax?: Record<string, string>
   modes?: { modeId: string; name: string }[]
   valuesByMode?: Record<string, FoundationSemanticValue>
   value?: FoundationSemanticValue
+  /** Resolved concrete values per mode (cross-source alias walk). */
+  resolvedByMode?: Record<string, FoundationResolvedModeValue>
+  /** Resolved value for single-value (style) tokens. */
+  resolved?: FoundationResolvedModeValue
   css?: string
 }
 

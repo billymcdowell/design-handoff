@@ -44,7 +44,7 @@ export async function refreshAuthSession() {
 }
 
 /**
- * `projects.owner` / `foundations.owner` must point at a `users` record.
+ * `projects.owner` must point at a `users` record.
  * PocketBase Admin ids are not valid there — map to a matching users row.
  *
  * When `createIfMissing` is true (project create), a linked users row is

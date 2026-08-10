@@ -1057,9 +1057,9 @@
     "system": false,
     "listRule": "@request.auth.id != \"\"",
     "viewRule": "@request.auth.id != \"\"",
-    "createRule": "@request.auth.role = \"designer\" && @request.body.owner = @request.auth.id",
-    "updateRule": "@request.auth.role = \"designer\" && owner = @request.auth.id",
-    "deleteRule": "@request.auth.role = \"designer\" && owner = @request.auth.id",
+    "createRule": "@request.auth.role = \"designer\" && @request.body.slug = \"default\"",
+    "updateRule": "@request.auth.role = \"designer\"",
+    "deleteRule": "@request.auth.role = \"designer\"",
     "fields": [
       {
         "autogeneratePattern": "[a-z0-9]{15}",
@@ -1077,7 +1077,7 @@
         "type": "text"
       },
       {
-        "help": "v2 mirror: sources[fileKey].tokens + catalog + history (initial|diff|source_removed). Categories: color, typography, number, shadow, blur, grid, other. Sync replaces one file slice.",
+        "help": "v2: sources[fileKey].tokens + catalog + history. Tokens keyed by Figma id (renames update name). Sync replaces one file slice; no-op syncs skip write.",
         "hidden": false,
         "id": "json_project_foundations_data",
         "maxSize": 20000000,
@@ -1114,6 +1114,21 @@
         "type": "number"
       },
       {
+        "autogeneratePattern": "",
+        "hidden": false,
+        "id": "txt_foundations_slug",
+        "max": 64,
+        "min": 1,
+        "name": "slug",
+        "pattern": "^[a-z0-9_-]+$",
+        "presentable": true,
+        "primaryKey": false,
+        "required": true,
+        "system": false,
+        "type": "text",
+        "help": "Singleton key. Always \"default\" for this single-tenant deploy."
+      },
+      {
         "hidden": false,
         "id": "_pbf_autodate_created_",
         "name": "created",
@@ -1132,24 +1147,10 @@
         "presentable": false,
         "system": false,
         "type": "autodate"
-      },
-      {
-        "cascadeDelete": true,
-        "collectionId": "_pb_users_auth_",
-        "help": "Owning dashboard user. One foundations row per user; shared across all projects.",
-        "hidden": false,
-        "id": "relation3479234172",
-        "maxSelect": 1,
-        "minSelect": 0,
-        "name": "owner",
-        "presentable": false,
-        "required": true,
-        "system": false,
-        "type": "relation"
       }
     ],
     "indexes": [
-      "CREATE UNIQUE INDEX `idx_foundations_owner` ON `foundations` (`owner`)"
+      "CREATE UNIQUE INDEX `idx_foundations_slug` ON `foundations` (`slug`)"
     ]
   },
   {
@@ -1255,6 +1256,302 @@
     ],
     "indexes": [
       "CREATE INDEX `idx_feedback_author` ON `feedback` (`author`)"
+    ]
+  },
+  {
+    "id": "complibraries001",
+    "name": "component_libraries",
+    "type": "base",
+    "system": false,
+    "listRule": "@request.auth.id != \"\"",
+    "viewRule": "@request.auth.id != \"\"",
+    "createRule": "@request.auth.role = \"designer\" && @request.body.slug = \"default\"",
+    "updateRule": "@request.auth.role = \"designer\"",
+    "deleteRule": "@request.auth.role = \"designer\"",
+    "fields": [
+      {
+        "autogeneratePattern": "[a-z0-9]{15}",
+        "help": "",
+        "hidden": false,
+        "id": "_pbf_text_id_",
+        "max": 15,
+        "min": 15,
+        "name": "id",
+        "pattern": "^[a-z0-9]+$",
+        "presentable": false,
+        "primaryKey": true,
+        "required": true,
+        "system": true,
+        "type": "text"
+      },
+      {
+        "autogeneratePattern": "",
+        "help": "Singleton key. Always \"default\" for this single-tenant deploy.",
+        "hidden": false,
+        "id": "txt_complib_slug",
+        "max": 64,
+        "min": 1,
+        "name": "slug",
+        "pattern": "^[a-z0-9_-]+$",
+        "presentable": true,
+        "primaryKey": false,
+        "required": true,
+        "system": false,
+        "type": "text"
+      },
+      {
+        "help": "sources[fileKey].componentKeys + history. Sync replaces one file slice.",
+        "hidden": false,
+        "id": "json_complib_data",
+        "maxSize": 20000000,
+        "name": "data",
+        "presentable": false,
+        "required": true,
+        "system": false,
+        "type": "json"
+      },
+      {
+        "help": "Total library_components rows across all sources.",
+        "hidden": false,
+        "id": "num_complib_components_count",
+        "max": null,
+        "min": 0,
+        "name": "components_count",
+        "onlyInt": true,
+        "presentable": false,
+        "required": false,
+        "system": false,
+        "type": "number"
+      },
+      {
+        "hidden": false,
+        "id": "_pbf_autodate_created_",
+        "name": "created",
+        "onCreate": true,
+        "onUpdate": false,
+        "presentable": false,
+        "system": false,
+        "type": "autodate"
+      },
+      {
+        "hidden": false,
+        "id": "_pbf_autodate_updated_",
+        "name": "updated",
+        "onCreate": true,
+        "onUpdate": true,
+        "presentable": false,
+        "system": false,
+        "type": "autodate"
+      }
+    ],
+    "indexes": [
+      "CREATE UNIQUE INDEX `idx_component_libraries_slug` ON `component_libraries` (`slug`)"
+    ]
+  },
+  {
+    "id": "libcomponents001",
+    "name": "library_components",
+    "type": "base",
+    "system": false,
+    "listRule": "@request.auth.id != \"\"",
+    "viewRule": "@request.auth.id != \"\"",
+    "createRule": "@request.auth.role = \"designer\"",
+    "updateRule": "@request.auth.role = \"designer\"",
+    "deleteRule": "@request.auth.role = \"designer\"",
+    "fields": [
+      {
+        "autogeneratePattern": "[a-z0-9]{15}",
+        "help": "",
+        "hidden": false,
+        "id": "_pbf_text_id_",
+        "max": 15,
+        "min": 15,
+        "name": "id",
+        "pattern": "^[a-z0-9]+$",
+        "presentable": false,
+        "primaryKey": true,
+        "required": true,
+        "system": true,
+        "type": "text"
+      },
+      {
+        "autogeneratePattern": "",
+        "help": "Figma componentKey (set key or standalone main key).",
+        "hidden": false,
+        "id": "txt_libcomp_key",
+        "max": 128,
+        "min": 1,
+        "name": "key",
+        "pattern": "",
+        "presentable": true,
+        "primaryKey": false,
+        "required": true,
+        "system": false,
+        "type": "text"
+      },
+      {
+        "autogeneratePattern": "",
+        "help": "",
+        "hidden": false,
+        "id": "txt_libcomp_name",
+        "max": 255,
+        "min": 1,
+        "name": "name",
+        "pattern": "",
+        "presentable": true,
+        "primaryKey": false,
+        "required": true,
+        "system": false,
+        "type": "text"
+      },
+      {
+        "hidden": false,
+        "id": "sel_libcomp_kind",
+        "maxSelect": 1,
+        "name": "kind",
+        "presentable": false,
+        "required": true,
+        "system": false,
+        "type": "select",
+        "values": ["COMPONENT", "COMPONENT_SET"]
+      },
+      {
+        "autogeneratePattern": "",
+        "help": "",
+        "hidden": false,
+        "id": "txt_libcomp_file_key",
+        "max": 128,
+        "min": 1,
+        "name": "file_key",
+        "pattern": "",
+        "presentable": false,
+        "primaryKey": false,
+        "required": true,
+        "system": false,
+        "type": "text"
+      },
+      {
+        "autogeneratePattern": "",
+        "help": "",
+        "hidden": false,
+        "id": "txt_libcomp_file_name",
+        "max": 255,
+        "min": 1,
+        "name": "file_name",
+        "pattern": "",
+        "presentable": false,
+        "primaryKey": false,
+        "required": true,
+        "system": false,
+        "type": "text"
+      },
+      {
+        "autogeneratePattern": "",
+        "help": "Raw Figma node id for deep links.",
+        "hidden": false,
+        "id": "txt_libcomp_figma_node_id",
+        "max": 64,
+        "min": 0,
+        "name": "figma_node_id",
+        "pattern": "",
+        "presentable": false,
+        "primaryKey": false,
+        "required": false,
+        "system": false,
+        "type": "text"
+      },
+      {
+        "help": "",
+        "hidden": false,
+        "id": "file_libcomp_preview",
+        "maxSelect": 1,
+        "maxSize": 10485760,
+        "mimeTypes": ["image/jpeg", "image/png", "image/webp", "image/gif", "image/svg+xml"],
+        "name": "preview",
+        "presentable": false,
+        "protected": false,
+        "required": false,
+        "system": false,
+        "thumbs": null,
+        "type": "file"
+      },
+      {
+        "help": "Variant entries: key, name, properties, figma_node_id.",
+        "hidden": false,
+        "id": "json_libcomp_variants",
+        "maxSize": 2000000,
+        "name": "variants",
+        "presentable": false,
+        "required": false,
+        "system": false,
+        "type": "json"
+      },
+      {
+        "help": "Bound variable/style refs {id,name} from the component tree.",
+        "hidden": false,
+        "id": "json_libcomp_tokens_used",
+        "maxSize": 2000000,
+        "name": "tokens_used",
+        "presentable": false,
+        "required": false,
+        "system": false,
+        "type": "json"
+      },
+      {
+        "autogeneratePattern": "",
+        "help": "Figma description (editable docs later).",
+        "hidden": false,
+        "id": "txt_libcomp_description",
+        "max": 5000,
+        "min": 0,
+        "name": "description",
+        "pattern": "",
+        "presentable": false,
+        "primaryKey": false,
+        "required": false,
+        "system": false,
+        "type": "text"
+      },
+      {
+        "autogeneratePattern": "",
+        "help": "Fingerprint to skip no-op sync upserts.",
+        "hidden": false,
+        "id": "txt_libcomp_content_hash",
+        "max": 128,
+        "min": 0,
+        "name": "content_hash",
+        "pattern": "",
+        "presentable": false,
+        "primaryKey": false,
+        "required": false,
+        "system": false,
+        "type": "text"
+      },
+      {
+        "hidden": false,
+        "id": "_pbf_autodate_created_",
+        "name": "created",
+        "onCreate": true,
+        "onUpdate": false,
+        "presentable": false,
+        "system": false,
+        "type": "autodate"
+      },
+      {
+        "hidden": false,
+        "id": "_pbf_autodate_updated_",
+        "name": "updated",
+        "onCreate": true,
+        "onUpdate": true,
+        "presentable": false,
+        "system": false,
+        "type": "autodate"
+      }
+    ],
+    "indexes": [
+      "CREATE UNIQUE INDEX `idx_library_components_key` ON `library_components` (`key`)",
+      "CREATE INDEX `idx_library_components_file_key` ON `library_components` (`file_key`)",
+      "CREATE INDEX `idx_library_components_name` ON `library_components` (`name`)"
     ]
   }
 ]

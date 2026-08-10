@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { Link, useLocation } from "react-router"
-import { Folder, Layers, MessageSquarePlus, Palette, Plus } from "lucide-react"
+import { Component, Folder, Layers, MessageSquarePlus, Palette, Plus } from "lucide-react"
 import {
   Sidebar,
   SidebarContent,
@@ -62,6 +62,15 @@ export function AppSidebar({ projects }: { projects: Project[] }) {
                 >
                   <Palette />
                   <span>Foundations</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  render={<Link to="/components" />}
+                  isActive={pathname.startsWith("/components")}
+                >
+                  <Component />
+                  <span>Components</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>

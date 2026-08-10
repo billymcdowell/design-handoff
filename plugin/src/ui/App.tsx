@@ -21,6 +21,7 @@ export function App() {
   const [selectionCount, setSelectionCount] = useState(0)
   const [isPublishing, setIsPublishing] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
+  const [isSyncingComponents, setIsSyncingComponents] = useState(false)
   const [isAuthenticating, setIsAuthenticating] = useState(false)
   const [authError, setAuthError] = useState<string | null>(null)
   const [projects, setProjects] = useState<Project[]>([])
@@ -31,6 +32,7 @@ export function App() {
   )
   const [startTime, setStartTime] = useState<number | null>(null)
   const [foundationsNote, setFoundationsNote] = useState<string | null>(null)
+  const [componentsNote, setComponentsNote] = useState<string | null>(null)
 
   // Refs so the (stable) message handler reads the latest values.
   const tokenRef = useRef<string | null>(null)
@@ -164,6 +166,30 @@ export function App() {
         break
       }
 
+      case "COMPONENTS_SYNC_PROGRESS": {
+        // Keep button label busy; note optional progress name
+        const name = msg.currentItemName as string | undefined
+        if (name) {
+          setComponentsNote(`Exporting “${name}”…`)
+        }
+        break
+      }
+
+      case "COMPONENTS_SYNC_COMPLETE": {
+        setIsSyncingComponents(false)
+        if (msg.success as boolean) {
+          const fileName = (msg.fileName as string | undefined) || "this file"
+          const changeLabel =
+            (msg.changeLabel as string | undefined) || "no changes"
+          setComponentsNote(
+            `Synced “${fileName}” (${changeLabel}). Other Figma files’ slices are kept.`,
+          )
+        } else {
+          setComponentsNote(null)
+        }
+        break
+      }
+
       default:
         break
     }
@@ -244,6 +270,20 @@ export function App() {
     post({ type: "EXPORT_FOUNDATIONAL" })
   }
 
+  function handleSyncComponents() {
+    if (!canPublish) {
+      post({
+        type: "NOTIFY",
+        message:
+          "❌ This account is read-only. Ask an admin to set your role to designer.",
+      })
+      return
+    }
+    setIsSyncingComponents(true)
+    setComponentsNote(null)
+    post({ type: "SYNC_COMPONENTS", token: tokenRef.current })
+  }
+
   function handleLogout() {
     post({ type: "LOGOUT" })
     setToken(null)
@@ -254,8 +294,10 @@ export function App() {
     setUploadProgress(null)
     setIsPublishing(false)
     setIsExporting(false)
+    setIsSyncingComponents(false)
     setAuthError(null)
     setFoundationsNote(null)
+    setComponentsNote(null)
   }
 
   // ── View routing (7.3) ──────────────────────────────────────────────────────
@@ -284,9 +326,12 @@ export function App() {
       canPublish={canPublish}
       isPublishing={isPublishing}
       isExporting={isExporting}
+      isSyncingComponents={isSyncingComponents}
       foundationsNote={foundationsNote}
+      componentsNote={componentsNote}
       onPublish={handlePublish}
       onExportFoundational={handleExportFoundational}
+      onSyncComponents={handleSyncComponents}
       onLogout={handleLogout}
     />
   )
@@ -355,9 +400,12 @@ function DashboardView(props: {
   canPublish: boolean
   isPublishing: boolean
   isExporting: boolean
+  isSyncingComponents: boolean
   foundationsNote: string | null
+  componentsNote: string | null
   onPublish: () => void
   onExportFoundational: () => void
+  onSyncComponents: () => void
   onLogout: () => void
 }) {
   const {
@@ -371,15 +419,19 @@ function DashboardView(props: {
     canPublish,
     isPublishing,
     isExporting,
+    isSyncingComponents,
     foundationsNote,
+    componentsNote,
     onPublish,
     onExportFoundational,
+    onSyncComponents,
     onLogout,
   } = props
 
   const publishDisabled =
     !canPublish || selectionCount === 0 || !selectedProjectId || isPublishing
-  const foundationalDisabled = !canPublish || isExporting
+  const foundationalDisabled = !canPublish || isExporting || isSyncingComponents
+  const componentsDisabled = !canPublish || isExporting || isSyncingComponents
 
   return (
     <div className="view">
@@ -444,6 +496,16 @@ function DashboardView(props: {
         slice.
       </p>
       {foundationsNote && <p className="small">{foundationsNote}</p>}
+
+      <button disabled={componentsDisabled} onClick={onSyncComponents}>
+        {isSyncingComponents ? "Syncing components..." : "Sync components"}
+      </button>
+      <p className="small muted">
+        Mirrors this file’s local components &amp; component sets into your
+        shared Components catalog (previews + variants). Sync library files
+        here.
+      </p>
+      {componentsNote && <p className="small">{componentsNote}</p>}
 
       <div className="spacer" />
       <div className="row between small muted">

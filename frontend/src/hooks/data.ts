@@ -10,10 +10,23 @@ import {
   getLayerPaddingMap,
   getLayer,
   getLayerDetails,
-  getUserFoundations,
+  getSharedFoundations,
+  getSharedComponentLibrary,
+  listLibraryComponents,
+  getLibraryComponentByKey,
+  findComponentUsages,
 } from "@/lib/api"
 import { sortFramesByDateDesc, dedupeLatestFrames } from "@/lib/frame-utils"
-import type { Foundation, Frame, Layer, LayerDetail, Project, Section } from "@/lib/types"
+import type {
+  ComponentLibrary,
+  Foundation,
+  Frame,
+  Layer,
+  LayerDetail,
+  LibraryComponent,
+  Project,
+  Section,
+} from "@/lib/types"
 
 export interface AsyncState<T> {
   data: T | undefined
@@ -151,10 +164,42 @@ export function useLayerInspector(layerId?: string) {
   )
 }
 
-export function useUserFoundations(enabled = true) {
+export function useSharedFoundations(enabled = true) {
   return useAsync<Foundation | null>(
-    () => getUserFoundations(),
+    () => getSharedFoundations(),
     "foundations",
     enabled,
+  )
+}
+
+export function useSharedComponentLibrary(enabled = true) {
+  return useAsync<ComponentLibrary | null>(
+    () => getSharedComponentLibrary(),
+    "component-libraries",
+    enabled,
+  )
+}
+
+export function useLibraryComponents(enabled = true) {
+  return useAsync<LibraryComponent[]>(
+    () => listLibraryComponents(),
+    "library-components",
+    enabled,
+  )
+}
+
+export function useLibraryComponent(key: string | undefined) {
+  return useAsync<LibraryComponent | null>(
+    () => getLibraryComponentByKey(key!),
+    `library-component:${key}`,
+    !!key,
+  )
+}
+
+export function useComponentUsages(key: string | undefined) {
+  return useAsync(
+    () => findComponentUsages(key!),
+    `component-usages:${key}`,
+    !!key,
   )
 }

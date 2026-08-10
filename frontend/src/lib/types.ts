@@ -139,7 +139,17 @@ export interface LayerDetail extends RecordModel {
   component?: {
     kind: "COMPONENT" | "INSTANCE" | "COMPONENT_SET"
     name: string
+    /** Figma `node.key` on this COMPONENT (stable for library components). */
+    componentKey?: string
+    /** For instances: key of the resolved main component. */
+    mainComponentKey?: string
+    /** For instances: node id of the resolved main component. */
+    mainComponentId?: string
     mainComponentName?: string
+    /** Figma `node.key` of the parent COMPONENT_SET when applicable. */
+    componentSetKey?: string
+    /** Node id of the parent COMPONENT_SET when applicable. */
+    componentSetId?: string
     componentSetName?: string
     variantProperties?: Record<string, string>
     componentProperties?: Record<string, string>
@@ -147,10 +157,78 @@ export interface LayerDetail extends RecordModel {
 }
 
 export interface Foundation extends RecordModel {
-  owner: string
+  slug: string
   data: FoundationsData
   variables_count: number
   styles_count: number
+}
+
+/** Token / style ref bound on a synced library component. */
+export interface LibraryTokenRef {
+  id: string
+  name: string
+}
+
+export interface LibraryComponentVariant {
+  key: string
+  name: string
+  properties: Record<string, string>
+  figma_node_id: string
+}
+
+export interface LibraryComponent extends RecordModel {
+  key: string
+  name: string
+  kind: "COMPONENT" | "COMPONENT_SET"
+  file_key: string
+  file_name: string
+  figma_node_id?: string
+  preview?: string
+  variants?: LibraryComponentVariant[]
+  tokens_used?: LibraryTokenRef[]
+  description?: string
+  content_hash?: string
+}
+
+export interface ComponentLibrarySource {
+  fileKey: string
+  fileName: string
+  updatedAt: string
+  componentKeys: string[]
+}
+
+export interface ComponentLibraryHistoryItemRef {
+  key: string
+  name: string
+  kind: "COMPONENT" | "COMPONENT_SET"
+}
+
+export interface ComponentLibraryHistorySummary {
+  kind: "initial" | "diff" | "source_removed"
+  added: ComponentLibraryHistoryItemRef[]
+  removed: ComponentLibraryHistoryItemRef[]
+  changed: ComponentLibraryHistoryItemRef[]
+  counts?: { components: number }
+}
+
+export interface ComponentLibraryHistoryEntry {
+  id: string
+  at: string
+  fileKey: string
+  fileName: string
+  summary: ComponentLibraryHistorySummary
+}
+
+export interface ComponentLibrariesData {
+  version: 1
+  sources: Record<string, ComponentLibrarySource>
+  history: ComponentLibraryHistoryEntry[]
+}
+
+export interface ComponentLibrary extends RecordModel {
+  slug: string
+  data: ComponentLibrariesData
+  components_count: number
 }
 
 export type FoundationCategory =
@@ -217,9 +295,22 @@ export type FoundationSemanticValue =
   | { kind: "grid"; grids: unknown[] }
   | { kind: "unknown"; raw: unknown }
 
+export type FoundationAliasStep = {
+  id: string
+  name: string
+}
+
+export type FoundationResolvedModeValue = {
+  value: FoundationSemanticValue
+  aliasChain: FoundationAliasStep[]
+  unresolved?: boolean
+}
+
 export type FoundationToken = {
   id: string
   name: string
+  /** Original Figma variable/style id when catalog key was namespaced. */
+  sourceId?: string
   sourceFileKey: string
   sourceFileName: string
   category: FoundationCategory
@@ -227,9 +318,14 @@ export type FoundationToken = {
   origin: FoundationOrigin
   collectionName?: string
   description?: string
+  codeSyntax?: Record<string, string>
   modes?: { modeId: string; name: string }[]
   valuesByMode?: Record<string, FoundationSemanticValue>
   value?: FoundationSemanticValue
+  /** Resolved concrete values per mode (cross-source alias walk). */
+  resolvedByMode?: Record<string, FoundationResolvedModeValue>
+  /** Resolved value for single-value (style) tokens. */
+  resolved?: FoundationResolvedModeValue
   css?: string
 }
 

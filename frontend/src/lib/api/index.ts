@@ -2,7 +2,10 @@ import { pb } from "../pocketbase"
 import { resolveOwnerUserId } from "../auth"
 import { framesByNameFilter, projectFilter, escapeFilterValue } from "../pb-filter"
 import { removeFoundationSourceFromData } from "@/features/foundations/catalog"
+import { removeComponentLibrarySourceFromData } from "@/features/components/catalog"
 import type {
+  ComponentLibrariesData,
+  ComponentLibrary,
   Feedback,
   FeedbackType,
   Foundation,
@@ -10,6 +13,7 @@ import type {
   Frame,
   Layer,
   LayerDetail,
+  LibraryComponent,
   Project,
   Section,
 } from "../types"
@@ -237,26 +241,20 @@ export async function getLayerPaddingMap(
   return map
 }
 
-// ─── Foundations (readable by all; written by admins) ───────
-export async function getUserFoundations(): Promise<Foundation | null> {
+// ─── Foundations (single-tenant singleton; readable by all; designers write) ─
+
+/** Fixed singleton key for this deploy. */
+export const SHARED_FOUNDATIONS_SLUG = "default"
+
+export async function getSharedFoundations(): Promise<Foundation | null> {
   if (!pb.authStore.isValid) return null
   try {
-    const ownerId = await resolveOwnerUserId()
     return await pb.collection("foundations").getFirstListItem<Foundation>(
-      `owner = "${ownerId}"`,
+      `slug = "${SHARED_FOUNDATIONS_SLUG}"`,
       { requestKey: null },
     )
   } catch {
-    // Developers (and admins without a row yet) see the latest shared set.
-    try {
-      const rows = await pb.collection("foundations").getList<Foundation>(1, 1, {
-        sort: "-updated",
-        requestKey: null,
-      })
-      return rows.items[0] ?? null
-    } catch {
-      return null
-    }
+    return null
   }
 }
 
@@ -282,6 +280,218 @@ export async function removeFoundationSource(
     variables_count: result.counts.variables_count,
     styles_count: result.counts.styles_count,
   })
+}
+
+// ─── Components library (singleton meta + library_components rows) ───────────
+
+export const SHARED_COMPONENT_LIBRARIES_SLUG = "default"
+
+export async function getSharedComponentLibrary(): Promise<ComponentLibrary | null> {
+  if (!pb.authStore.isValid) return null
+  try {
+    return await pb
+      .collection("component_libraries")
+      .getFirstListItem<ComponentLibrary>(
+        `slug = "${SHARED_COMPONENT_LIBRARIES_SLUG}"`,
+        { requestKey: null },
+      )
+  } catch {
+    return null
+  }
+}
+
+export async function listLibraryComponents(): Promise<LibraryComponent[]> {
+  if (!pb.authStore.isValid) return []
+  return pb.collection("library_components").getFullList<LibraryComponent>({
+    sort: "name",
+    requestKey: null,
+  })
+}
+
+export async function getLibraryComponentByKey(
+  key: string,
+): Promise<LibraryComponent | null> {
+  if (!pb.authStore.isValid || !key) return null
+  try {
+    return await pb
+      .collection("library_components")
+      .getFirstListItem<LibraryComponent>(
+        `key = "${escapeFilterValue(key)}"`,
+        { requestKey: null },
+      )
+  } catch {
+    return null
+  }
+}
+
+export async function updateComponentLibraryRecord(
+  id: string,
+  body: {
+    data: ComponentLibrariesData
+    components_count: number
+  },
+): Promise<ComponentLibrary> {
+  return await pb.collection("component_libraries").update<ComponentLibrary>(id, body)
+}
+
+export async function removeComponentLibrarySource(
+  library: ComponentLibrary,
+  fileKey: string,
+): Promise<ComponentLibrary> {
+  const result = removeComponentLibrarySourceFromData(library.data, fileKey)
+  if (!result.historyEntry) return library
+
+  for (const key of result.deleteKeys) {
+    try {
+      const row = await getLibraryComponentByKey(key)
+      if (row) await pb.collection("library_components").delete(row.id)
+    } catch {
+      /* best-effort cleanup */
+    }
+  }
+
+  return await updateComponentLibraryRecord(library.id, {
+    data: result.data,
+    components_count: result.componentsCount,
+  })
+}
+
+/**
+ * Find published layer usages of a catalog component on latest frame versions.
+ * Matches mainComponentKey, componentSetKey, or componentKey on layer_details.component.
+ */
+export async function findComponentUsages(componentKey: string): Promise<
+  Array<{
+    layerId: string
+    layerName: string
+    frameId: string
+    frameName: string
+    pageName?: string
+    projectId: string
+    projectName: string
+    variantProperties?: Record<string, string>
+  }>
+> {
+  if (!componentKey) return []
+
+  const escaped = escapeFilterValue(componentKey)
+  // PocketBase JSON path filters — try several identity fields.
+  const filter = [
+    `component.mainComponentKey = "${escaped}"`,
+    `component.componentSetKey = "${escaped}"`,
+    `component.componentKey = "${escaped}"`,
+  ].join(" || ")
+
+  let details: LayerDetail[] = []
+  try {
+    details = await pb.collection("layer_details").getFullList<LayerDetail>({
+      filter,
+      requestKey: null,
+    })
+  } catch {
+    // Fallback: scan a page of recent details if JSON filters unsupported
+    try {
+      const page = await pb.collection("layer_details").getList<LayerDetail>(1, 500, {
+        requestKey: null,
+      })
+      details = page.items.filter((d) => {
+        const c = d.component
+        if (!c) return false
+        return (
+          c.mainComponentKey === componentKey ||
+          c.componentSetKey === componentKey ||
+          c.componentKey === componentKey
+        )
+      })
+    } catch {
+      return []
+    }
+  }
+
+  if (details.length === 0) return []
+
+  const layerIds = [...new Set(details.map((d) => d.layer))]
+  const layers = await Promise.all(
+    layerIds.map(async (id) => {
+      try {
+        return await pb.collection("layers").getOne<Layer>(id)
+      } catch {
+        return null
+      }
+    }),
+  )
+  const layerById = new Map(
+    layers.filter((l): l is Layer => !!l).map((l) => [l.id, l]),
+  )
+
+  const frameIds = [...new Set([...layerById.values()].map((l) => l.frame))]
+  const frames = await Promise.all(
+    frameIds.map(async (id) => {
+      try {
+        return await pb.collection("frames").getOne<Frame>(id, { expand: "project" })
+      } catch {
+        return null
+      }
+    }),
+  )
+  const frameById = new Map(
+    frames.filter((f): f is Frame => !!f).map((f) => [f.id, f]),
+  )
+
+  // Keep usages on latest version only (per project+name).
+  const latestByScreen = new Map<string, Frame>()
+  for (const frame of frameById.values()) {
+    const screenKey = `${frame.project}::${frame.name}`
+    const prev = latestByScreen.get(screenKey)
+    if (!prev) {
+      latestByScreen.set(screenKey, frame)
+      continue
+    }
+    const prevTime = new Date(prev.updated || prev.created || 0).getTime()
+    const nextTime = new Date(frame.updated || frame.created || 0).getTime()
+    if (nextTime >= prevTime) latestByScreen.set(screenKey, frame)
+  }
+  const latestFrameIds = new Set([...latestByScreen.values()].map((f) => f.id))
+
+  const detailByLayer = new Map(details.map((d) => [d.layer, d]))
+  const usages: Array<{
+    layerId: string
+    layerName: string
+    frameId: string
+    frameName: string
+    pageName?: string
+    projectId: string
+    projectName: string
+    variantProperties?: Record<string, string>
+  }> = []
+
+  for (const layer of layerById.values()) {
+    if (!latestFrameIds.has(layer.frame)) continue
+    const frame = frameById.get(layer.frame)
+    if (!frame) continue
+    const detail = detailByLayer.get(layer.id)
+    const expand = frame.expand as { project?: Project } | undefined
+    const projectName =
+      expand?.project?.name ??
+      (typeof frame.project === "string" ? frame.project : "Project")
+    usages.push({
+      layerId: layer.id,
+      layerName: layer.name,
+      frameId: frame.id,
+      frameName: frame.name,
+      pageName: frame.page_name,
+      projectId: frame.project,
+      projectName,
+      variantProperties: detail?.component?.variantProperties,
+    })
+  }
+
+  usages.sort((a, b) => {
+    const p = a.projectName.localeCompare(b.projectName)
+    if (p !== 0) return p
+    return a.frameName.localeCompare(b.frameName)
+  })
+  return usages
 }
 
 // ─── Feedback (create by any authed user; Admin reads in PocketBase) ─

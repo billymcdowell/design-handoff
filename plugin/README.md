@@ -35,14 +35,20 @@ Setup:
 Designer accounts can publish. Developer accounts can sign in read-only (publish
 buttons disabled; PocketBase API rules still reject writes).
 
-**Foundations:** `foundations.owner` must be a `users` record id. A designer
-login already uses that id, so ownership maps directly.
+**Foundations:** single-tenant shared catalog (`slug = "default"`). Any
+designer sync updates the same row. Tokens are keyed by Figma variable/style
+id — renames update `name` on the existing token.
+
+**Components:** single-tenant catalog (`component_libraries` meta +
+`library_components` rows). Sync mirrors local `COMPONENT` / `COMPONENT_SET`
+nodes (previews, variants, bound tokens). Instances on published screens link
+via `componentKey` / `mainComponentKey`.
 
 **Sync foundations** mirrors this Figma file’s local variables & styles into a
 per-file slice (other files’ slices are kept). Diffs are semantic (by Figma id);
 the first sync for a file logs an “Initial sync” summary, later syncs only log
-real added/removed/changed tokens, and empty diffs skip history. Non-v2 data is
-replaced on the next sync (no backwards compatibility).
+real added/removed/changed tokens, and empty diffs skip the PocketBase write
+entirely. Non-v2 data is replaced on the next sync (no backwards compatibility).
 
 ## Architecture
 

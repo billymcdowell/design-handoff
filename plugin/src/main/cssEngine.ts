@@ -912,10 +912,14 @@ export async function extractComponentSpec(
   if (node.type === "COMPONENT") {
     const component = node as ComponentNode
     let componentSetName: string | undefined
+    let componentSetKey: string | undefined
+    let componentSetId: string | undefined
     try {
       const parent = component.parent
       if (parent && parent.type === "COMPONENT_SET") {
         componentSetName = parent.name
+        componentSetKey = parent.key
+        componentSetId = parent.id
       }
     } catch {
       /* ignore */
@@ -927,7 +931,10 @@ export async function extractComponentSpec(
     return {
       kind: "COMPONENT",
       name: component.name,
+      componentKey: component.key,
       ...(componentSetName ? { componentSetName } : {}),
+      ...(componentSetKey ? { componentSetKey } : {}),
+      ...(componentSetId ? { componentSetId } : {}),
       ...(variantProperties && Object.keys(variantProperties).length > 0
         ? { variantProperties }
         : {}),
@@ -937,14 +944,22 @@ export async function extractComponentSpec(
   if (node.type === "INSTANCE") {
     const instance = node as InstanceNode
     let mainComponentName: string | undefined
+    let mainComponentKey: string | undefined
+    let mainComponentId: string | undefined
     let componentSetName: string | undefined
+    let componentSetKey: string | undefined
+    let componentSetId: string | undefined
     try {
       const main = await instance.getMainComponentAsync()
       if (main) {
         mainComponentName = main.name
+        mainComponentKey = main.key
+        mainComponentId = main.id
         const parent = main.parent
         if (parent && parent.type === "COMPONENT_SET") {
           componentSetName = parent.name
+          componentSetKey = parent.key
+          componentSetId = parent.id
         }
       }
     } catch {
@@ -974,7 +989,11 @@ export async function extractComponentSpec(
       kind: "INSTANCE",
       name: instance.name,
       ...(mainComponentName ? { mainComponentName } : {}),
+      ...(mainComponentKey ? { mainComponentKey } : {}),
+      ...(mainComponentId ? { mainComponentId } : {}),
       ...(componentSetName ? { componentSetName } : {}),
+      ...(componentSetKey ? { componentSetKey } : {}),
+      ...(componentSetId ? { componentSetId } : {}),
       ...(variantProperties ? { variantProperties } : {}),
       ...(Object.keys(componentProperties).length > 0
         ? { componentProperties }

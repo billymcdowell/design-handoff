@@ -9,6 +9,8 @@ import OauthCallbackPage from "@/pages/oauth-callback"
 import ProjectsPage from "@/pages/projects"
 import ProjectDetailPage from "@/pages/project-detail"
 import FoundationsPage from "@/pages/foundations"
+import ComponentsPage from "@/pages/components"
+import ComponentDetailPage from "@/pages/component-detail"
 import FrameViewerRoute from "@/pages/frame-viewer"
 
 export default function App() {
@@ -29,6 +31,8 @@ export default function App() {
               <Route path="/projects" element={<ProjectsPage />} />
               <Route path="/projects/:projectId" element={<ProjectDetailPage />} />
               <Route path="/foundations" element={<FoundationsPage />} />
+              <Route path="/components" element={<ComponentsPage />} />
+              <Route path="/components/:componentKey" element={<ComponentDetailPage />} />
               {/* Legacy per-project URL → shared foundations */}
               <Route
                 path="/projects/:projectId/foundations"

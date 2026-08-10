@@ -48,10 +48,13 @@ login is verified end-to-end.
 ```
 _superusers  →  PocketBase Admin (API rules bypassed; ops only)
 users        →  designers (write) + developers (read-only)
-       └─ owns projects / foundations (relation targets)
+       └─ owns projects (relation target)
+foundations  →  single-tenant singleton (slug=default); not per-user
+component_libraries → singleton meta (slug=default) for library sync
+library_components  → one row per synced COMPONENT / COMPONENT_SET
 ```
 
-`projects.owner` / `foundations.owner` always reference a `users` id. When an
+`projects.owner` always references a `users` id. When an
 Admin creates a project in the web app, the app links (or creates) a `users` row
 with the same email for that relation.
 
@@ -113,7 +116,7 @@ with the same email for that relation.
 | `styles` | json | `{ backgroundColor?, borderRadius?, borderWidth?, borderColor?, boxShadow?, opacity?, effects?, backgroundColorToken?, borderColorToken?, effectStyle? }` |
 | `typography` | json | `{ fontFamily, fontSize, fontWeight, lineHeight, letterSpacing, color, textAlign, textDecoration?, textTransform?, characters?, textStyle?, colorToken?, … } \| null` |
 | `code` | json | `{ css, tailwind, react }` |
-| `component` | json | optional `{ kind, name, mainComponentName?, componentSetName?, variantProperties?, componentProperties? }` |
+| `component` | json | optional `{ kind, name, componentKey?, mainComponentKey?, mainComponentId?, mainComponentName?, componentSetKey?, componentSetId?, componentSetName?, variantProperties?, componentProperties? }` |
 
 Token/style refs (optional, resolved at publish time):
 
@@ -127,21 +130,56 @@ Token/style refs (optional, resolved at publish time):
 
 `backgroundColorToken` / `borderColorToken` / `effectStyle` live under `styles`; `textStyle` / `colorToken` live under `typography`.
 
-### 6. `foundations` — 1:1 with `users` (shared across all projects)
+### 6. `foundations` — single-tenant singleton (organization catalog)
 
 | Field | Type | Notes |
 | --- | --- | --- |
-| `owner` | relation → `users` | required, **unique**, cascade delete |
+| `slug` | text | required, **unique** — always `"default"` for this deploy |
 | `data` | json | v2 multi-file token catalog + history (see below) |
 | `variables_count` | number (int) | catalog tokens with `origin === "variable"` |
 | `styles_count` | number (int) | catalog tokens with style origins (paint/text/effect/grid) |
 
-Publishing variables & styles from the plugin **mirrors by Figma file key** into
-this single record for the authenticated user. Re-syncing from the same file
-replaces that file’s token slice only; other files’ tokens are kept. Every
-project reads the same foundations.
+One shared Foundations row for the whole PocketBase instance. Any **designer**
+may sync from the plugin or remove a source in the web app. Developers
+(and all authenticated users) can read it.
 
-### 7. `feedback` — product feedback about Design Handoff
+Publishing variables & styles from the plugin **mirrors by Figma file key**
+into this singleton. Re-syncing from the same file replaces that file’s token
+slice only; other files’ tokens are kept. Tokens are keyed by **Figma
+variable/style id** (not name): renaming a variable updates `name` on the same
+id and does not create a duplicate or leave a stale entry. Syncs with no
+semantic changes skip the PocketBase write entirely.
+
+### 7. `component_libraries` — singleton meta for the components catalog
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `slug` | text | required, **unique** — always `"default"` |
+| `data` | json | `{ version, sources[fileKey], history[] }` — multi-file sync bookkeeping |
+| `components_count` | number (int) | total `library_components` rows |
+
+Any **designer** may sync from the plugin or remove a source in the web app.
+Developers (and all authenticated users) can read it.
+
+### 8. `library_components` — one row per synced component / component set
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `key` | text | required, **unique** — Figma `componentKey` (set or standalone) |
+| `name` | text | display name |
+| `kind` | select | `COMPONENT` \| `COMPONENT_SET` |
+| `file_key` / `file_name` | text | source Figma file |
+| `figma_node_id` | text | optional — deep link target |
+| `preview` | file | default variant / set thumbnail |
+| `variants` | json | `[{ key, name, properties, figma_node_id }]` |
+| `tokens_used` | json | `[{ id, name }]` bound variables/styles |
+| `description` | text | Figma description (editable docs later) |
+| `content_hash` | text | skip no-op sync upserts |
+
+Re-sync from the same file upserts by `key` and deletes keys that disappeared
+from that file’s slice (tracked via `component_libraries.data.sources`).
+
+### 9. `feedback` — product feedback about Design Handoff
 
 | Field | Type | Notes |
 | --- | --- | --- |
@@ -154,7 +192,7 @@ Any authenticated user can **create** (with `author = @request.auth.id`, or
 Admin via a linked `users` row). List / view / update / delete are Admin-only
 (null rules — review in Admin UI → Collections → `feedback`).
 
-### 8. `oauth_sessions` — one-time Microsoft OAuth relay for the Figma plugin
+### 10. `oauth_sessions` — one-time Microsoft OAuth relay for the Figma plugin
 
 | Field | Type | Notes |
 | --- | --- | --- |
@@ -222,11 +260,16 @@ in the Admin UI to preserve Figma node ids directly.)
 
 ## `foundations.data` shape
 
-Multi-file **mirror**. Each Figma file that syncs local variables & styles is
-stored under `sources[<fileKey>]` as an id-keyed token map. `catalog` is the
-flattened union for the Foundations viewer (colliding names across files get a
-`` `${fileName} / ${name}` `` prefix). `history` is a capped changelog (last 50
-entries). Non-v2 payloads are discarded on the next sync (no backwards compat).
+Multi-file **mirror** of the organization catalog. Each Figma file that syncs
+local variables & styles is stored under `sources[<fileKey>]` as an
+**id-keyed** token map (Figma `VariableID:…` / style ids). `catalog` is the
+flattened union for the Foundations viewer (colliding *display names* across
+files get a `` `${fileName} / ${name}` `` prefix; identity remains the Figma
+id). `history` is a capped changelog (last 50 entries). Non-v2 payloads are
+discarded on the next sync (no backwards compat).
+
+A rename in Figma keeps the same catalog key and only changes `name` (logged
+as a field diff). Empty syncs do not append history and do not PATCH PocketBase.
 
 ```jsonc
 {
@@ -310,7 +353,9 @@ All authenticated users can **list/view** every record. Mutations require
 | `frames` | any authed user | designer only |
 | `layers` | any authed user | designer only |
 | `layer_details` | any authed user | designer only |
-| `foundations` | any authed user | designer only (and `owner = @request.auth.id` on write) |
+| `foundations` | any authed user | designer only (singleton `slug=default`) |
+| `component_libraries` | any authed user | designer only (singleton `slug=default`) |
+| `library_components` | any authed user | designer only |
 | `feedback` | Admin only | create: any authed user (`author = self`, or Admin); update/delete: Admin only |
 
 ---
@@ -332,6 +377,13 @@ pulling schema/migration changes, rebuild so the image gets the new files:
 docker compose up -d --build
 ```
 
+`1785667200_component_libraries.js` adds `component_libraries` (singleton
+meta) and `library_components` (per-component rows with preview files).
+
+`1785667100_foundations_singleton_slug.js` wipes foundations rows, replaces
+per-user `owner` with unique `slug` (`default` singleton), and lets any
+designer write. Re-sync from Figma afterward.
+
 `1785666300_foundations_v2_catalog.js` updates foundations field help and clears
 non-v2 `data` blobs (re-sync from Figma afterward).
 
@@ -343,7 +395,7 @@ timeout 30s) so the plugin can chunk layer / layer_detail creates.
 1. Open Admin → **Settings → Import collections**
 2. Upload [`schema.json`](schema.json) (same contents as `pb_collections_import.json`)
 3. Leave **Delete missing collections** unchecked (keeps the built-in `users` collection and merges fields)
-4. Confirm — this adds `projects` / `sections` / `frames` / `layers` / `layer_details` / `foundations` / `feedback` **and** the `users.role` field (`designer` | `developer`)
+4. Confirm — this adds `projects` / `sections` / `frames` / `layers` / `layer_details` / `foundations` / `component_libraries` / `library_components` / `feedback` **and** the `users.role` field (`designer` | `developer`)
 
 Then create login users as needed:
 

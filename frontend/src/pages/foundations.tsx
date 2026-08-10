@@ -1,10 +1,17 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
+import { Link } from "react-router"
 import { FoundationsViewer } from "@/features/foundations/components/foundations-viewer"
-import { useUserFoundations } from "@/hooks/data"
+import {
+  downloadTextFile,
+  exportFoundationsCss,
+  exportFoundationsTypeScript,
+} from "@/features/foundations/export"
+import { useSharedFoundations } from "@/hooks/data"
 import { removeFoundationSource } from "@/lib/api"
 import { isPocketBaseSuperuser } from "@/lib/auth"
 import { pb } from "@/lib/pocketbase"
 import type {
+  FoundationCategory,
   FoundationHistoryChangedItem,
   FoundationHistoryEntry,
   FoundationHistoryItemRef,
@@ -220,6 +227,26 @@ function FieldDiffRow({
   )
 }
 
+function TokenHistoryLink({
+  id,
+  name,
+  category,
+}: {
+  id: string
+  name: string
+  category: FoundationCategory
+}) {
+  return (
+    <Link
+      to={`/foundations?token=${encodeURIComponent(id)}`}
+      className="text-foreground hover:text-primary underline-offset-2 hover:underline"
+    >
+      {name}{" "}
+      <span className="text-muted-foreground opacity-60">({category})</span>
+    </Link>
+  )
+}
+
 function SourcesList({
   sources,
   canRemove,
@@ -301,8 +328,7 @@ function ChangeList({
       <ul className="text-muted-foreground max-h-40 overflow-y-auto font-mono text-xs">
         {items.map((item) => (
           <li key={item.id}>
-            {item.name}{" "}
-            <span className="opacity-60">({item.category})</span>
+            <TokenHistoryLink id={item.id} name={item.name} category={item.category} />
           </li>
         ))}
       </ul>
@@ -321,10 +347,11 @@ function ChangedList({ items }: { items: FoundationHistoryChangedItem[] }) {
         {items.map((item) => (
           <li key={item.id} className="space-y-2 rounded border p-3">
             <p className="font-mono font-medium">
-              {item.name}{" "}
-              <span className="text-muted-foreground font-normal">
-                ({item.category})
-              </span>
+              <TokenHistoryLink
+                id={item.id}
+                name={item.name}
+                category={item.category}
+              />
             </p>
             <div className="space-y-3">
               {item.changes.flatMap((change, i) => {
@@ -343,7 +370,6 @@ function ChangedList({ items }: { items: FoundationHistoryChangedItem[] }) {
                     />
                   ))
                 }
-                // Skip redundant css row when a value.* leaf already covers it
                 if (
                   change.path === "css" &&
                   item.changes.some(
@@ -373,7 +399,88 @@ function ChangedList({ items }: { items: FoundationHistoryChangedItem[] }) {
   )
 }
 
-function RecentChanges({ history }: { history: FoundationHistoryEntry[] }) {
+type HistoryFilter = {
+  sourceFileKey: string | "all"
+  category: FoundationCategory | "all"
+  kind: "all" | "added" | "removed" | "changed"
+}
+
+function entryMatchesFilter(
+  entry: FoundationHistoryEntry,
+  filter: HistoryFilter,
+): boolean {
+  if (filter.sourceFileKey !== "all" && entry.fileKey !== filter.sourceFileKey) {
+    return false
+  }
+  const { summary } = entry
+  if (filter.kind === "added" && summary.added.length === 0 && summary.kind !== "initial") {
+    return false
+  }
+  if (filter.kind === "removed" && summary.removed.length === 0) return false
+  if (filter.kind === "changed" && summary.changed.length === 0) return false
+
+  if (filter.category === "all") return true
+
+  const refs = [
+    ...summary.added,
+    ...summary.removed,
+    ...summary.changed,
+  ]
+  if (refs.length === 0) return summary.kind === "initial"
+  return refs.some((r) => r.category === filter.category)
+}
+
+function filterSummary(
+  entry: FoundationHistoryEntry,
+  filter: HistoryFilter,
+): FoundationHistoryEntry["summary"] {
+  const { summary } = entry
+  if (filter.category === "all" && filter.kind === "all") return summary
+
+  const catOk = (c: FoundationCategory) =>
+    filter.category === "all" || c === filter.category
+
+  return {
+    ...summary,
+    added:
+      filter.kind === "removed" || filter.kind === "changed"
+        ? []
+        : summary.added.filter((i) => catOk(i.category)),
+    removed:
+      filter.kind === "added" || filter.kind === "changed"
+        ? []
+        : summary.removed.filter((i) => catOk(i.category)),
+    changed:
+      filter.kind === "added" || filter.kind === "removed"
+        ? []
+        : summary.changed.filter((i) => catOk(i.category)),
+  }
+}
+
+function RecentChanges({
+  history,
+  sources,
+}: {
+  history: FoundationHistoryEntry[]
+  sources: Record<string, FoundationSource>
+}) {
+  const [filter, setFilter] = useState<HistoryFilter>({
+    sourceFileKey: "all",
+    category: "all",
+    kind: "all",
+  })
+
+  const sourceOptions = useMemo(() => {
+    const fromHistory = new Map<string, string>()
+    for (const entry of history) {
+      fromHistory.set(entry.fileKey, entry.fileName)
+    }
+    for (const source of Object.values(sources)) {
+      fromHistory.set(source.fileKey, source.fileName)
+    }
+    return [...fromHistory.entries()].sort((a, b) => a[1].localeCompare(b[1]))
+  }, [history, sources])
+
   if (history.length === 0) {
     return (
       <div className="space-y-2">
@@ -386,15 +493,132 @@ function RecentChanges({ history }: { history: FoundationHistoryEntry[] }) {
     )
   }
 
-  const newestFirst = [...history].reverse()
+  const newestFirst = [...history].reverse().filter((entry) =>
+    entryMatchesFilter(entry, filter),
+  )
 
   return (
-    <div className="space-y-2">
-      <h2 className="text-sm font-medium">Recent changes</h2>
-      <Accordion multiple className="w-full">
-        {newestFirst.map((entry) => {
-          const { summary } = entry
-          if (summary.kind === "initial") {
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-sm font-medium">Recent changes</h2>
+        <div className="flex flex-wrap gap-2">
+          <select
+            className="border-input bg-background h-8 rounded-md border px-2 text-xs"
+            value={filter.sourceFileKey}
+            onChange={(e) =>
+              setFilter((f) => ({
+                ...f,
+                sourceFileKey: e.target.value as HistoryFilter["sourceFileKey"],
+              }))
+            }
+          >
+            <option value="all">All sources</option>
+            {sourceOptions.map(([key, name]) => (
+              <option key={key} value={key}>
+                {name}
+              </option>
+            ))}
+          </select>
+          <select
+            className="border-input bg-background h-8 rounded-md border px-2 text-xs"
+            value={filter.category}
+            onChange={(e) =>
+              setFilter((f) => ({
+                ...f,
+                category: e.target.value as HistoryFilter["category"],
+              }))
+            }
+          >
+            <option value="all">All categories</option>
+            <option value="color">Color</option>
+            <option value="typography">Typography</option>
+            <option value="number">Number</option>
+            <option value="shadow">Shadow</option>
+            <option value="blur">Blur</option>
+            <option value="grid">Grid</option>
+            <option value="other">Other</option>
+          </select>
+          <select
+            className="border-input bg-background h-8 rounded-md border px-2 text-xs"
+            value={filter.kind}
+            onChange={(e) =>
+              setFilter((f) => ({
+                ...f,
+                kind: e.target.value as HistoryFilter["kind"],
+              }))
+            }
+          >
+            <option value="all">All changes</option>
+            <option value="added">Added</option>
+            <option value="removed">Removed</option>
+            <option value="changed">Changed</option>
+          </select>
+        </div>
+      </div>
+
+      {newestFirst.length === 0 ? (
+        <p className="text-muted-foreground text-sm">
+          No history entries match these filters.
+        </p>
+      ) : (
+        <Accordion multiple className="w-full">
+          {newestFirst.map((entry) => {
+            const summary = filterSummary(entry, filter)
+            if (summary.kind === "initial") {
+              return (
+                <AccordionItem key={entry.id} value={entry.id}>
+                  <AccordionTrigger>
+                    <span className="flex flex-wrap items-center gap-2 text-left">
+                      <span className="font-medium">{entry.fileName}</span>
+                      <span className="text-muted-foreground text-xs font-normal">
+                        {formatWhen(entry.at)}
+                      </span>
+                      <Badge variant="secondary">
+                        Initial sync · {summary.counts?.tokens ?? 0} tokens
+                      </Badge>
+                    </span>
+                  </AccordionTrigger>
+                  <AccordionContent>
+                    <p className="text-muted-foreground text-sm">
+                      First sync of this Figma file. Subsequent syncs will list
+                      only added, removed, and changed tokens.
+                    </p>
+                  </AccordionContent>
+                </AccordionItem>
+              )
+            }
+
+            if (summary.kind === "source_removed") {
+              return (
+                <AccordionItem key={entry.id} value={entry.id}>
+                  <AccordionTrigger>
+                    <span className="flex flex-wrap items-center gap-2 text-left">
+                      <span className="font-medium">{entry.fileName}</span>
+                      <span className="text-muted-foreground text-xs font-normal">
+                        {formatWhen(entry.at)}
+                      </span>
+                      <Badge variant="destructive">
+                        Removed source ·{" "}
+                        {summary.counts?.tokens ?? summary.removed.length} tokens
+                      </Badge>
+                    </span>
+                  </AccordionTrigger>
+                  <AccordionContent>
+                    <ChangeList
+                      label="Removed"
+                      items={summary.removed}
+                      tone="removed"
+                    />
+                  </AccordionContent>
+                </AccordionItem>
+              )
+            }
+
+            const total =
+              summary.added.length +
+              summary.removed.length +
+              summary.changed.length
+
             return (
               <AccordionItem key={entry.id} value={entry.id}>
                 <AccordionTrigger>
@@ -404,94 +628,98 @@ function RecentChanges({ history }: { history: FoundationHistoryEntry[] }) {
                       {formatWhen(entry.at)}
                     </span>
                     <Badge variant="secondary">
-                      Initial sync · {summary.counts?.tokens ?? 0} tokens
+                      +{summary.added.length} · −{summary.removed.length} · ~
+                      {summary.changed.length}
                     </Badge>
                   </span>
                 </AccordionTrigger>
                 <AccordionContent>
-                  <p className="text-muted-foreground text-sm">
-                    First sync of this Figma file. Subsequent syncs will list
-                    only added, removed, and changed tokens.
-                  </p>
+                  {total === 0 ? (
+                    <p className="text-muted-foreground text-sm">
+                      No semantic changes.
+                    </p>
+                  ) : (
+                    <div className="space-y-4">
+                      {(summary.added.length > 0 || summary.removed.length > 0) && (
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <ChangeList
+                            label="Added"
+                            items={summary.added}
+                            tone="added"
+                          />
+                          <ChangeList
+                            label="Removed"
+                            items={summary.removed}
+                            tone="removed"
+                          />
+                        </div>
+                      )}
+                      <ChangedList items={summary.changed} />
+                    </div>
+                  )}
                 </AccordionContent>
               </AccordionItem>
             )
-          }
+          })}
+        </Accordion>
+      )}
+    </div>
+  )
+}
 
-          if (summary.kind === "source_removed") {
-            return (
-              <AccordionItem key={entry.id} value={entry.id}>
-                <AccordionTrigger>
-                  <span className="flex flex-wrap items-center gap-2 text-left">
-                    <span className="font-medium">{entry.fileName}</span>
-                    <span className="text-muted-foreground text-xs font-normal">
-                      {formatWhen(entry.at)}
-                    </span>
-                    <Badge variant="destructive">
-                      Removed source · {summary.counts?.tokens ?? summary.removed.length}{" "}
-                      tokens
-                    </Badge>
-                  </span>
-                </AccordionTrigger>
-                <AccordionContent>
-                  <ChangeList
-                    label="Removed"
-                    items={summary.removed}
-                    tone="removed"
-                  />
-                </AccordionContent>
-              </AccordionItem>
+function ExportPanel({ data }: { data: FoundationsData }) {
+  const [copied, setCopied] = useState<"css" | "ts" | null>(null)
+
+  async function copy(kind: "css" | "ts") {
+    const text =
+      kind === "css" ? exportFoundationsCss(data) : exportFoundationsTypeScript(data)
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(kind)
+      setTimeout(() => setCopied(null), 2000)
+    } catch {
+      // ignore
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <h2 className="text-sm font-medium">Export</h2>
+      <p className="text-muted-foreground text-sm">
+        Download or copy CSS custom properties and a TypeScript token map from
+        the current catalog (aliases resolved).
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() =>
+            downloadTextFile("foundations.css", exportFoundationsCss(data))
+          }
+        >
+          Download CSS
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() =>
+            downloadTextFile(
+              "foundations.ts",
+              exportFoundationsTypeScript(data),
             )
           }
-
-          const total =
-            summary.added.length +
-            summary.removed.length +
-            summary.changed.length
-
-          return (
-            <AccordionItem key={entry.id} value={entry.id}>
-              <AccordionTrigger>
-                <span className="flex flex-wrap items-center gap-2 text-left">
-                  <span className="font-medium">{entry.fileName}</span>
-                  <span className="text-muted-foreground text-xs font-normal">
-                    {formatWhen(entry.at)}
-                  </span>
-                  <Badge variant="secondary">
-                    +{summary.added.length} · −{summary.removed.length} · ~
-                    {summary.changed.length}
-                  </Badge>
-                </span>
-              </AccordionTrigger>
-              <AccordionContent>
-                {total === 0 ? (
-                  <p className="text-muted-foreground text-sm">
-                    No semantic changes.
-                  </p>
-                ) : (
-                  <div className="space-y-4">
-                    {(summary.added.length > 0 || summary.removed.length > 0) && (
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <ChangeList
-                          label="Added"
-                          items={summary.added}
-                          tone="added"
-                        />
-                        <ChangeList
-                          label="Removed"
-                          items={summary.removed}
-                          tone="removed"
-                        />
-                      </div>
-                    )}
-                    <ChangedList items={summary.changed} />
-                  </div>
-                )}
-              </AccordionContent>
-            </AccordionItem>
-          )
-        })}
-      </Accordion>
+        >
+          Download TypeScript
+        </Button>
+        <Button type="button" variant="secondary" size="sm" onClick={() => void copy("css")}>
+          {copied === "css" ? "Copied CSS" : "Copy CSS"}
+        </Button>
+        <Button type="button" variant="secondary" size="sm" onClick={() => void copy("ts")}>
+          {copied === "ts" ? "Copied TS" : "Copy TypeScript"}
+        </Button>
+      </div>
     </div>
   )
 }
@@ -503,7 +731,7 @@ function foundationsMeta(data: FoundationsData) {
 }
 
 export default function FoundationsPage() {
-  const { data: foundation, isLoading, refetch } = useUserFoundations()
+  const { data: foundation, isLoading, refetch } = useSharedFoundations()
   const [removingKey, setRemovingKey] = useState<string | null>(null)
   const [removeError, setRemoveError] = useState<string | null>(null)
 
@@ -515,8 +743,8 @@ export default function FoundationsPage() {
         <h1 className="text-2xl font-bold">Foundations</h1>
         <p className="text-muted-foreground">
           No foundations yet. Sync local variables &amp; styles from each Figma
-          file in the plugin — each file mirrors into a shared slice across all
-          of your projects.
+          file in the plugin — one shared catalog for the whole organization
+          (tokens keyed by Figma id so renames update in place).
         </p>
       </div>
     )
@@ -547,7 +775,7 @@ export default function FoundationsPage() {
       <div>
         <h1 className="text-2xl font-bold">Foundations</h1>
         <p className="text-muted-foreground text-sm">
-          Shared across all projects
+          Shared organization catalog
           {sourceCount > 0
             ? ` · ${sourceCount} Figma file${sourceCount === 1 ? "" : "s"}`
             : ""}{" "}
@@ -569,7 +797,8 @@ export default function FoundationsPage() {
           onRemove={(fileKey) => void handleRemove(fileKey)}
         />
       )}
-      <RecentChanges history={history} />
+      <ExportPanel data={foundation.data} />
+      <RecentChanges history={history} sources={sources} />
       <FoundationsViewer data={foundation.data} />
     </div>
   )

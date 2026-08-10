@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react"
+import { Link } from "react-router"
 import { Copy, Check, ExternalLink } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useLayerInspector } from "@/hooks/data"
+import { useLayerInspector, useLibraryComponent } from "@/hooks/data"
 import { transformLayerDetail, type TransformedLayerDetail } from "@/lib/transforms"
 import { copyToClipboard } from "@/lib/clipboard"
 import { buildFigmaNodeUrl } from "@/lib/figma-url"
@@ -96,6 +97,17 @@ export function Inspector({
   )
 }
 
+function catalogKeyFor(
+  component: NonNullable<TransformedLayerDetail["component"]>,
+): string | undefined {
+  return (
+    component.componentSetKey ||
+    component.mainComponentKey ||
+    component.componentKey ||
+    undefined
+  )
+}
+
 function ComponentSummary({
   component,
 }: {
@@ -108,6 +120,8 @@ function ComponentSummary({
   const variants = component.variantProperties
     ? Object.entries(component.variantProperties)
     : []
+  const catalogKey = catalogKeyFor(component)
+  const { data: catalogEntry } = useLibraryComponent(catalogKey)
 
   return (
     <div className="bg-muted/50 space-y-1.5 rounded-md px-3 py-2">
@@ -115,7 +129,16 @@ function ComponentSummary({
         <span className="text-muted-foreground text-xs">Component</span>
         <span className="font-mono text-xs">{component.kind}</span>
       </div>
-      <p className="truncate text-sm font-medium">{title}</p>
+      {catalogEntry && catalogKey ? (
+        <Link
+          to={`/components/${encodeURIComponent(catalogKey)}`}
+          className="text-sm font-medium underline-offset-2 hover:underline"
+        >
+          {title}
+        </Link>
+      ) : (
+        <p className="truncate text-sm font-medium">{title}</p>
+      )}
       {component.mainComponentName &&
         component.mainComponentName !== title && (
           <p className="text-muted-foreground truncate text-xs">
@@ -229,7 +252,11 @@ function StyleTab({ layer }: { layer: TransformedLayerDetail }) {
               <span className="font-mono text-sm">{layer.styles.backgroundColor}</span>
             </div>
             {layer.styles.backgroundColorToken && (
-              <TokenLabel label="Variable" name={layer.styles.backgroundColorToken.name} />
+              <TokenLabel
+                label="Variable"
+                name={layer.styles.backgroundColorToken.name}
+                tokenId={layer.styles.backgroundColorToken.id}
+              />
             )}
           </div>
         </Section>
@@ -251,7 +278,11 @@ function StyleTab({ layer }: { layer: TransformedLayerDetail }) {
                 <span className="font-mono text-sm">{layer.styles.borderColor}</span>
               </div>
               {layer.styles.borderColorToken && (
-                <TokenLabel label="Variable" name={layer.styles.borderColorToken.name} />
+                <TokenLabel
+                  label="Variable"
+                  name={layer.styles.borderColorToken.name}
+                  tokenId={layer.styles.borderColorToken.id}
+                />
               )}
             </div>
           )}
@@ -261,7 +292,11 @@ function StyleTab({ layer }: { layer: TransformedLayerDetail }) {
         <Section title="Effects">
           <div className="space-y-3">
             {layer.styles.effectStyle && (
-              <TokenLabel label="Effect Style" name={layer.styles.effectStyle.name} />
+              <TokenLabel
+                label="Effect Style"
+                name={layer.styles.effectStyle.name}
+                tokenId={layer.styles.effectStyle.id}
+              />
             )}
             {layer.styles.effects.map((effect, index) => (
               <div key={`${effect.type}-${index}`} className="space-y-2">
@@ -299,12 +334,20 @@ function StyleTab({ layer }: { layer: TransformedLayerDetail }) {
             <div className="space-y-2">
               <PropertyItem label="Drop shadow" value={layer.styles.boxShadow} />
               {layer.styles.effectStyle && (
-                <TokenLabel label="Effect Style" name={layer.styles.effectStyle.name} />
+                <TokenLabel
+                  label="Effect Style"
+                  name={layer.styles.effectStyle.name}
+                  tokenId={layer.styles.effectStyle.id}
+                />
               )}
             </div>
           )}
           {!layer.styles.boxShadow && layer.styles.effectStyle && (
-            <TokenLabel label="Effect Style" name={layer.styles.effectStyle.name} />
+            <TokenLabel
+              label="Effect Style"
+              name={layer.styles.effectStyle.name}
+              tokenId={layer.styles.effectStyle.id}
+            />
           )}
         </>
       )}
@@ -323,7 +366,11 @@ function TypographyTab({
   return (
     <div className="space-y-4">
       {typography.textStyle && (
-        <TokenLabel label="Text Style" name={typography.textStyle.name} />
+        <TokenLabel
+          label="Text Style"
+          name={typography.textStyle.name}
+          tokenId={typography.textStyle.id}
+        />
       )}
       {typography.characters && (
         <Section title="Content">
@@ -351,7 +398,11 @@ function TypographyTab({
             <span className="font-mono text-sm">{typography.color}</span>
           </div>
           {typography.colorToken && (
-            <TokenLabel label="Variable" name={typography.colorToken.name} />
+            <TokenLabel
+              label="Variable"
+              name={typography.colorToken.name}
+              tokenId={typography.colorToken.id}
+            />
           )}
         </div>
       </Section>
@@ -411,11 +462,29 @@ function PropertyItem({ label, value }: { label: string; value: string }) {
   )
 }
 
-function TokenLabel({ label, name }: { label: string; name: string }) {
+function TokenLabel({
+  label,
+  name,
+  tokenId,
+}: {
+  label: string
+  name: string
+  tokenId?: string
+}) {
   return (
     <div className="bg-muted/50 flex items-center justify-between gap-2 rounded-md px-3 py-2">
       <span className="text-muted-foreground shrink-0 text-xs">{label}</span>
-      <span className="font-mono text-sm break-all text-right">{name}</span>
+      {tokenId ? (
+        <Link
+          to={`/foundations?token=${encodeURIComponent(tokenId)}`}
+          className="text-primary font-mono text-sm break-all text-right underline-offset-2 hover:underline"
+          title="Open in Foundations"
+        >
+          {name}
+        </Link>
+      ) : (
+        <span className="font-mono text-sm break-all text-right">{name}</span>
+      )}
     </div>
   )
 }

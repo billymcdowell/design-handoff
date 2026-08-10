@@ -5,6 +5,12 @@
 import { STORAGE_KEY_THEME, STORAGE_KEY_TOKEN } from "../constants"
 import type { BackendPayload, FoundationalExport } from "../types"
 import {
+  extractLibraryComponents,
+  formatComponentHistorySummary,
+  planComponentSync,
+  type ExistingLibraryComponentRow,
+} from "./components"
+import {
   countCatalogTokens,
   formatHistorySummary,
   getFoundationFileIdentity,
@@ -14,10 +20,15 @@ import {
 import { fetchProjectsFromApi, resolveProjectForPublish } from "./planLimits"
 import {
   assertCanPublish,
-  findFoundationRecord,
-  resolveFoundationOwnerId,
+  createLibraryComponentRecord,
+  deleteLibraryComponentRecord,
+  findSharedComponentLibraryRecord,
+  findSharedFoundationRecord,
+  listLibraryComponentsByFileKey,
   startMicrosoftLogin,
-  upsertFoundationRecord,
+  updateLibraryComponentRecord,
+  upsertSharedComponentLibraryRecord,
+  upsertSharedFoundationRecord,
   validateAuthToken,
 } from "./pbClient"
 import { createBackendPayload, isPublishableFrame } from "./publish"
@@ -331,8 +342,6 @@ figma.ui.onmessage = async (msg: Msg) => {
           return
         }
 
-        // Always re-validate so we know whether this is a users vs _superusers
-        // token. Superuser ids are not valid foundations.owner relation targets.
         const check = await validateAuthToken(token)
         if (!check.ok) {
           figma.ui.postMessage({
@@ -358,11 +367,12 @@ figma.ui.onmessage = async (msg: Msg) => {
         }
         const authToken = check.token
 
-        const ownerId = await resolveFoundationOwnerId(authToken, check)
         const { fileKey, fileName } = getFoundationFileIdentity()
-        const existing = await findFoundationRecord(authToken, ownerId)
+        const existing = await findSharedFoundationRecord(authToken)
         const existingData = existing?.data ?? null
 
+        // Tokens are keyed by Figma variable/style id; renames update `name`
+        // on the same id (diff emits changed name, not remove+add).
         const { data: synced, historyEntry } = syncFoundationsData(
           existingData,
           {
@@ -373,17 +383,26 @@ figma.ui.onmessage = async (msg: Msg) => {
           },
         )
 
+        if (!historyEntry) {
+          figma.notify(`Foundations unchanged for “${fileName}”`)
+          figma.ui.postMessage({
+            type: "FOUNDATIONAL_UPLOAD_COMPLETE",
+            success: true,
+            fileName,
+            summary: null,
+            changeLabel: "no changes",
+          })
+          return
+        }
+
         const counts = countCatalogTokens(synced.catalog)
-        await upsertFoundationRecord(authToken, {
-          owner: ownerId,
+        await upsertSharedFoundationRecord(authToken, {
           data: synced,
           variables_count: counts.variables_count,
           styles_count: counts.styles_count,
         })
 
-        const changeLabel = historyEntry
-          ? formatHistorySummary(historyEntry.summary)
-          : "no changes"
+        const changeLabel = formatHistorySummary(historyEntry.summary)
         figma.notify(
           `✅ Foundations synced from “${fileName}” (${changeLabel})`,
         )
@@ -391,14 +410,187 @@ figma.ui.onmessage = async (msg: Msg) => {
           type: "FOUNDATIONAL_UPLOAD_COMPLETE",
           success: true,
           fileName,
-          summary: historyEntry?.summary ?? null,
+          summary: historyEntry.summary,
           changeLabel,
         })
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         figma.notify(`❌ ${message}`)
+
         figma.ui.postMessage({
           type: "FOUNDATIONAL_UPLOAD_COMPLETE",
+          success: false,
+          error: message,
+        })
+      }
+      break
+    }
+
+    case "SYNC_COMPONENTS": {
+      try {
+        const token =
+          (msg.token as string) ||
+          (await figma.clientStorage.getAsync(STORAGE_KEY_TOKEN))
+        if (!token) {
+          figma.ui.postMessage({
+            type: "COMPONENTS_SYNC_COMPLETE",
+            success: false,
+            error: "Not authenticated",
+          })
+          return
+        }
+
+        const check = await validateAuthToken(token)
+        if (!check.ok) {
+          figma.ui.postMessage({
+            type: "COMPONENTS_SYNC_COMPLETE",
+            success: false,
+            error: check.error,
+          })
+          return
+        }
+        if (check.token !== token) {
+          await figma.clientStorage.setAsync(STORAGE_KEY_TOKEN, check.token)
+        }
+        if (!check.canPublish) {
+          const msgText = assertCanPublish(check.collectionName, {
+            role: check.role,
+          })
+          figma.ui.postMessage({
+            type: "COMPONENTS_SYNC_COMPLETE",
+            success: false,
+            error: msgText || "This account cannot sync components.",
+          })
+          return
+        }
+        const authToken = check.token
+
+        figma.ui.postMessage({
+          type: "COMPONENTS_SYNC_PROGRESS",
+          current: 0,
+          total: 1,
+          currentItemName: "Scanning components...",
+        })
+
+        const { fileKey, fileName, components } = await extractLibraryComponents(
+          (current, total, name) => {
+            figma.ui.postMessage({
+              type: "COMPONENTS_SYNC_PROGRESS",
+              current,
+              total,
+              currentItemName: name,
+            })
+          },
+        )
+
+        const existingMeta = await findSharedComponentLibraryRecord(authToken)
+        const existingRowsRaw = await listLibraryComponentsByFileKey(
+          authToken,
+          fileKey,
+        )
+        const existingRows: ExistingLibraryComponentRow[] = existingRowsRaw.map(
+          (row) => ({
+            id: String(row.id),
+            key: String(row.key ?? ""),
+            name: String(row.name ?? ""),
+            kind:
+              row.kind === "COMPONENT_SET" ? "COMPONENT_SET" : "COMPONENT",
+            content_hash:
+              typeof row.content_hash === "string" ? row.content_hash : undefined,
+          }),
+        )
+
+        const plan = planComponentSync({
+          existingMetaRaw: existingMeta?.data ?? null,
+          existingRows,
+          fileKey,
+          fileName,
+          extracted: components,
+        })
+
+        if (!plan.historyEntry) {
+          figma.notify(`Components unchanged for “${fileName}”`)
+          figma.ui.postMessage({
+            type: "COMPONENTS_SYNC_COMPLETE",
+            success: true,
+            fileName,
+            changeLabel: "no changes",
+          })
+          return
+        }
+
+        for (const id of plan.toDeleteIds) {
+          await deleteLibraryComponentRecord(authToken, id)
+        }
+
+        for (const component of plan.toCreate) {
+          await createLibraryComponentRecord(
+            authToken,
+            {
+              key: component.key,
+              name: component.name,
+              kind: component.kind,
+              file_key: fileKey,
+              file_name: fileName,
+              figma_node_id: component.figma_node_id,
+              variants: component.variants,
+              tokens_used: component.tokens_used,
+              description: component.description,
+              content_hash: component.content_hash,
+            },
+            {
+              bytes: component.previewBytes,
+              fileName: component.previewFileName,
+            },
+          )
+        }
+
+        for (const { existingId, component } of plan.toUpdate) {
+          await updateLibraryComponentRecord(
+            authToken,
+            existingId,
+            {
+              key: component.key,
+              name: component.name,
+              kind: component.kind,
+              file_key: fileKey,
+              file_name: fileName,
+              figma_node_id: component.figma_node_id,
+              variants: component.variants,
+              tokens_used: component.tokens_used,
+              description: component.description,
+              content_hash: component.content_hash,
+            },
+            {
+              bytes: component.previewBytes,
+              fileName: component.previewFileName,
+            },
+          )
+        }
+
+        await upsertSharedComponentLibraryRecord(authToken, {
+          data: plan.nextMeta,
+          components_count: plan.componentsCount,
+        })
+
+        const changeLabel = formatComponentHistorySummary(
+          plan.historyEntry.summary,
+        )
+        figma.notify(
+          `✅ Components synced from “${fileName}” (${changeLabel})`,
+        )
+        figma.ui.postMessage({
+          type: "COMPONENTS_SYNC_COMPLETE",
+          success: true,
+          fileName,
+          changeLabel,
+          summary: plan.historyEntry.summary,
+        })
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        figma.notify(`❌ ${message}`)
+        figma.ui.postMessage({
+          type: "COMPONENTS_SYNC_COMPLETE",
           success: false,
           error: message,
         })

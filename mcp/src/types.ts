@@ -105,7 +105,12 @@ export interface LayerDetail {
   component?: {
     kind: "COMPONENT" | "INSTANCE" | "COMPONENT_SET"
     name: string
+    componentKey?: string
+    mainComponentKey?: string
+    mainComponentId?: string
     mainComponentName?: string
+    componentSetKey?: string
+    componentSetId?: string
     componentSetName?: string
     variantProperties?: Record<string, string>
     componentProperties?: Record<string, string>

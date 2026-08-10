@@ -19,6 +19,14 @@ export function frameImageSrc(frame: Frame): string {
   return "/placeholder.svg"
 }
 
+/** Preview image for a synced library component. */
+export function libraryComponentPreviewSrc(
+  component: { id: string; collectionId: string; preview?: string },
+): string | undefined {
+  if (!component.preview) return undefined
+  return fileUrl(component, component.preview)
+}
+
 /** Same resolution order for project thumbnails. */
 export function projectThumbnailSrc(project: Project): string | undefined {
   if (project.thumbnail_url) return project.thumbnail_url
