@@ -218,7 +218,10 @@ async function collectTokensUsed(root: SceneNode): Promise<TokenRef[]> {
   return Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name))
 }
 
-function walkPages(visit: (node: SceneNode) => void): void {
+async function walkPages(visit: (node: SceneNode) => void): Promise<void> {
+  // manifest.json uses documentAccess: "dynamic-page" — pages must be loaded
+  // before reading `.children`.
+  await figma.loadAllPagesAsync()
   for (const page of figma.root.children) {
     if (page.type !== "PAGE") continue
     const stack: SceneNode[] = [...page.children]
@@ -233,9 +236,11 @@ function walkPages(visit: (node: SceneNode) => void): void {
 }
 
 /** Top-level library entries: COMPONENT_SETs and standalone COMPONENTs. */
-export function findLibraryRoots(): Array<ComponentNode | ComponentSetNode> {
+export async function findLibraryRoots(): Promise<
+  Array<ComponentNode | ComponentSetNode>
+> {
   const roots: Array<ComponentNode | ComponentSetNode> = []
-  walkPages((node) => {
+  await walkPages((node) => {
     if (node.type === "COMPONENT_SET") {
       roots.push(node)
     } else if (node.type === "COMPONENT") {
@@ -378,7 +383,7 @@ export async function extractLibraryComponents(
   components: ExtractedLibraryComponent[]
 }> {
   const { fileKey, fileName } = getFoundationFileIdentity()
-  const roots = findLibraryRoots()
+  const roots = await findLibraryRoots()
   const components: ExtractedLibraryComponent[] = []
   for (let i = 0; i < roots.length; i++) {
     const root = roots[i]
