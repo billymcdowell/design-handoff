@@ -13,9 +13,10 @@ import {
 } from "./foundational"
 import { fetchProjectsFromApi, resolveProjectForPublish } from "./planLimits"
 import {
-  authWithPassword,
+  assertCanPublish,
   findFoundationRecord,
   resolveFoundationOwnerId,
+  startMicrosoftLogin,
   upsertFoundationRecord,
   validateAuthToken,
 } from "./pbClient"
@@ -35,7 +36,23 @@ figma.on("selectionchange", () => {
   })
 })
 
+/** Shared cancel flag for in-flight Microsoft OAuth polling. */
+let oauthCancel: { cancelled: boolean } | null = null
+
 type Msg = { type: string; [key: string]: unknown }
+
+function postAuthResult(
+  check: Extract<Awaited<ReturnType<typeof validateAuthToken>>, { ok: true }>,
+) {
+  figma.ui.postMessage({
+    type: "AUTH_RESULT",
+    token: check.token,
+    displayName: check.displayName,
+    userId: check.userId,
+    role: check.role,
+    canPublish: check.canPublish,
+  })
+}
 
 figma.ui.onmessage = async (msg: Msg) => {
   switch (msg.type) {
@@ -61,12 +78,7 @@ figma.ui.onmessage = async (msg: Msg) => {
         if (check.token !== token) {
           await figma.clientStorage.setAsync(STORAGE_KEY_TOKEN, check.token)
         }
-        figma.ui.postMessage({
-          type: "AUTH_RESULT",
-          token: check.token,
-          displayName: check.displayName,
-          userId: check.userId,
-        })
+        postAuthResult(check)
       } catch (err) {
         // Offline / unreachable — keep the stored token but show a generic label.
         console.log("CHECK_AUTH validation failed, using stored token", err)
@@ -74,18 +86,26 @@ figma.ui.onmessage = async (msg: Msg) => {
           type: "AUTH_RESULT",
           token,
           displayName: "User",
+          canPublish: false,
         })
       }
       break
     }
 
-    case "LOGIN": {
-      // Validate on the main thread (sandbox fetch — no iframe CORS; matches
-      // networkAccess).
-      const email = String(msg.email ?? "").trim()
-      const password = String(msg.password ?? "")
+    case "LOGIN_MICROSOFT": {
+      if (oauthCancel) oauthCancel.cancelled = true
+      oauthCancel = { cancelled: false }
+      const cancel = oauthCancel
       try {
-        const check = await authWithPassword(email, password)
+        const check = await startMicrosoftLogin(cancel)
+        if (cancel.cancelled) {
+          figma.ui.postMessage({
+            type: "AUTH_RESULT",
+            token: null,
+            error: "Sign-in cancelled.",
+          })
+          break
+        }
         if (!check.ok) {
           figma.ui.postMessage({
             type: "AUTH_RESULT",
@@ -97,12 +117,7 @@ figma.ui.onmessage = async (msg: Msg) => {
         await figma.clientStorage.setAsync(STORAGE_KEY_TOKEN, check.token)
         const saved = await figma.clientStorage.getAsync(STORAGE_KEY_TOKEN)
         if (saved === check.token) {
-          figma.ui.postMessage({
-            type: "AUTH_RESULT",
-            token: check.token,
-            displayName: check.displayName,
-            userId: check.userId,
-          })
+          postAuthResult(check)
         } else {
           throw new Error("Read-back mismatch")
         }
@@ -115,11 +130,24 @@ figma.ui.onmessage = async (msg: Msg) => {
           token: null,
           error: message,
         })
+      } finally {
+        if (oauthCancel === cancel) oauthCancel = null
       }
       break
     }
 
+    case "CANCEL_LOGIN": {
+      if (oauthCancel) oauthCancel.cancelled = true
+      figma.ui.postMessage({
+        type: "AUTH_RESULT",
+        token: null,
+        error: "Sign-in cancelled.",
+      })
+      break
+    }
+
     case "LOGOUT": {
+      if (oauthCancel) oauthCancel.cancelled = true
       await figma.clientStorage.setAsync(STORAGE_KEY_TOKEN, null)
       figma.ui.postMessage({ type: "AUTH_RESULT", token: null })
       break
@@ -173,6 +201,28 @@ figma.ui.onmessage = async (msg: Msg) => {
           return
         }
 
+        const auth = await validateAuthToken(token)
+        if (!auth.ok) {
+          figma.notify(`❌ ${auth.error}`)
+          figma.ui.postMessage({ type: "PUBLISH_COMPLETE", success: false })
+          return
+        }
+        if (!auth.canPublish) {
+          const msgText = assertCanPublish(auth.collectionName, {
+            role: auth.role,
+          })
+          figma.notify(`❌ ${msgText || "This account cannot publish."}`)
+          figma.ui.postMessage({
+            type: "PUBLISH_COMPLETE",
+            success: false,
+            error: msgText || "This account cannot publish.",
+          })
+          return
+        }
+        if (auth.token !== token) {
+          await figma.clientStorage.setAsync(STORAGE_KEY_TOKEN, auth.token)
+        }
+
         const frames = selection.filter(isPublishableFrame)
         if (frames.length === 0) {
           figma.notify(
@@ -184,7 +234,7 @@ figma.ui.onmessage = async (msg: Msg) => {
 
         // Confirm the selected project still exists before expensive extraction.
         await resolveProjectForPublish({
-          token,
+          token: auth.token,
           selectedProjectId: projectId,
           framesToAdd: frames.length,
         })
@@ -192,7 +242,7 @@ figma.ui.onmessage = async (msg: Msg) => {
         const payload = await createBackendPayload(
           frames,
           projectId,
-          token,
+          auth.token,
           (current, total, currentItemName) => {
             figma.ui.postMessage({
               type: "UPLOAD_PROGRESS",
@@ -294,6 +344,17 @@ figma.ui.onmessage = async (msg: Msg) => {
         }
         if (check.token !== token) {
           await figma.clientStorage.setAsync(STORAGE_KEY_TOKEN, check.token)
+        }
+        if (!check.canPublish) {
+          const msgText = assertCanPublish(check.collectionName, {
+            role: check.role,
+          })
+          figma.ui.postMessage({
+            type: "FOUNDATIONAL_UPLOAD_COMPLETE",
+            success: false,
+            error: msgText || "This account cannot sync foundations.",
+          })
+          return
         }
         const authToken = check.token
 

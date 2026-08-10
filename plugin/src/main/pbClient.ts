@@ -4,7 +4,7 @@
 // Auth is a PocketBase JWT in the `Authorization` header (from users
 // email/password login). No custom endpoints, no X-API-Key — see SCHEMA.md.
 
-import { API_BASE } from "../constants"
+import { API_BASE, APP_ORIGIN } from "../constants"
 import {
   buildBatchMultipartBody,
   buildMultipartBody,
@@ -20,16 +20,32 @@ export const BATCH_MAX_REQUESTS = 50
 export const FRAME_UPLOAD_CONCURRENCY = 6
 
 const PB_ID_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789"
+/** Longer alphabet for oauth_sessions capability ids (still [a-z0-9]). */
+const OAUTH_SESSION_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789"
 const USERS_COLLECTION = "users"
 const SUPERUSERS_COLLECTION = "_superusers"
+const OAUTH_SESSIONS_COLLECTION = "oauth_sessions"
 /** PocketBase system collection id for `_superusers`. */
 const SUPERUSERS_COLLECTION_ID = "pbc_3142635823"
+
+/** Poll / timeout for the Microsoft OAuth relay (matches ~5 min server TTL). */
+const OAUTH_POLL_MS = 1500
+const OAUTH_TIMEOUT_MS = 5 * 60 * 1000
 
 /** PocketBase default id: 15 lowercase alphanumeric characters. */
 export function generateRecordId(): string {
   let id = ""
   for (let i = 0; i < 15; i++) {
     id += PB_ID_CHARS[Math.floor(Math.random() * PB_ID_CHARS.length)]
+  }
+  return id
+}
+
+/** Random capability token used as `oauth_sessions` record id (32 chars). */
+export function generateOauthSessionId(): string {
+  let id = ""
+  for (let i = 0; i < 32; i++) {
+    id += OAUTH_SESSION_CHARS[Math.floor(Math.random() * OAUTH_SESSION_CHARS.length)]
   }
   return id
 }
@@ -76,6 +92,10 @@ export type TokenValidation =
       email: string | null
       /** JWT to store (from login or auth-refresh). */
       token: string
+      /** `users.role` when present (`designer` | `developer`). */
+      role: string | null
+      /** False for developer accounts — API still rejects writes. */
+      canPublish: boolean
     }
   | { ok: false; error: string }
 
@@ -94,21 +114,34 @@ function isSuperuserCollection(name: string): boolean {
   return name === SUPERUSERS_COLLECTION || name === SUPERUSERS_COLLECTION_ID
 }
 
+function roleFromRecord(record: Record<string, unknown> | null): string | null {
+  if (!record || typeof record.role !== "string") return null
+  return record.role
+}
+
 /**
  * Plugin publish requires a designer `users` account (or Admin `_superusers`
- * for rare ops). Developers are read-only and cannot publish.
+ * for rare ops). Developers may sign in but cannot publish — PocketBase API
+ * rules enforce the same boundary server-side.
  */
-function assertCanPublish(
+export function assertCanPublish(
   collectionName: string,
   record: Record<string, unknown> | null,
 ): string | null {
   if (isSuperuserCollection(collectionName)) return null
-  const role = record && typeof record.role === "string" ? record.role : ""
+  const role = roleFromRecord(record)
   if (role === "designer") return null
   if (role === "developer") {
     return "This account is a developer (read-only). Ask an admin to set your role to designer to publish."
   }
   return "Only designer accounts can publish from the plugin. Set role to designer in PocketBase Admin."
+}
+
+function canPublishFromAuth(
+  collectionName: string,
+  record: Record<string, unknown> | null,
+): boolean {
+  return assertCanPublish(collectionName, record) === null
 }
 
 function authResultFromBody(
@@ -127,8 +160,6 @@ function authResultFromBody(
     record && typeof record.collectionName === "string"
       ? record.collectionName
       : fallbackCollection
-  const roleError = assertCanPublish(recordCollection, record)
-  if (roleError) return { ok: false, error: roleError }
 
   const nextToken =
     typeof body.token === "string" && body.token
@@ -145,6 +176,8 @@ function authResultFromBody(
     collectionName: recordCollection,
     email,
     token: nextToken,
+    role: roleFromRecord(record),
+    canPublish: canPublishFromAuth(recordCollection, record),
   }
 }
 
@@ -168,8 +201,102 @@ function collectionHintFromJwt(token: string): string | null {
 }
 
 /**
+ * Sign in with Microsoft via the web OAuth relay.
+ * Opens `${APP_ORIGIN}/oauth/start?session=…` in the system browser; the
+ * plugin polls `oauth_sessions` until the callback writes a PocketBase JWT.
+ */
+export async function startMicrosoftLogin(
+  signal?: { cancelled: boolean },
+): Promise<TokenValidation> {
+  const sessionId = generateOauthSessionId()
+  try {
+    const createRes = await fetch(
+      recordsUrl(OAUTH_SESSIONS_COLLECTION),
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: sessionId }),
+      },
+    )
+    if (!createRes.ok) {
+      return {
+        ok: false,
+        error: `Could not start Microsoft sign-in: ${await pbErrorMessage(createRes)}`,
+      }
+    }
+
+    const startUrl = `${APP_ORIGIN}/oauth/start?session=${encodeURIComponent(sessionId)}`
+    figma.openExternal(startUrl)
+
+    const token = await pollOauthSession(sessionId, signal)
+    if (signal?.cancelled) {
+      return { ok: false, error: "Sign-in cancelled." }
+    }
+    if (!token) {
+      return {
+        ok: false,
+        error:
+          "Microsoft sign-in timed out. Complete sign-in in the browser, then try again.",
+      }
+    }
+
+    // Single-use: delete the relay record (best-effort).
+    try {
+      await fetch(recordsUrl(OAUTH_SESSIONS_COLLECTION, sessionId), {
+        method: "DELETE",
+      })
+    } catch {
+      /* cron TTL will clean up */
+    }
+
+    return validateAuthToken(token)
+  } catch (err) {
+    const networkError = err instanceof Error ? err.message : String(err)
+    return {
+      ok: false,
+      error: `Cannot reach PocketBase at ${API_BASE}. Is it running? (${networkError})`,
+    }
+  }
+}
+
+/**
+ * Poll `oauth_sessions/{id}` until `token` is set, the timeout elapses, or
+ * `signal.cancelled` becomes true.
+ */
+export async function pollOauthSession(
+  sessionId: string,
+  signal?: { cancelled: boolean },
+): Promise<string | null> {
+  const deadline = Date.now() + OAUTH_TIMEOUT_MS
+  while (Date.now() < deadline) {
+    if (signal?.cancelled) return null
+    try {
+      const res = await fetch(recordsUrl(OAUTH_SESSIONS_COLLECTION, sessionId), {
+        headers: { "Content-Type": "application/json" },
+      })
+      if (res.ok) {
+        const body = (await res.json()) as { token?: string }
+        if (typeof body.token === "string" && body.token.trim()) {
+          return body.token.trim()
+        }
+      } else if (res.status === 404) {
+        return null
+      }
+    } catch {
+      /* keep polling through transient network blips */
+    }
+    await sleep(OAUTH_POLL_MS)
+  }
+  return null
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
  * Sign in with a dashboard `users` email/password.
- * Requires role `designer` to publish from the plugin.
+ * Kept for local/dev cutover; the plugin UI uses Microsoft OAuth.
  */
 export async function authWithPassword(
   email: string,
@@ -262,7 +389,7 @@ export async function validateAuthToken(token: string): Promise<TokenValidation>
     return {
       ok: false,
       error:
-        "Session expired. Sign in again with your designer email and password.",
+        "Session expired. Sign in again with Microsoft from the plugin.",
     }
   }
   return {

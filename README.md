@@ -37,11 +37,16 @@ If you already have a `.env` with `PB_SUPERUSER_EMAIL` / `PB_SUPERUSER_PASSWORD`
 
 Then:
 
-1. Admin → **Collections → `users` → New record** — create a login user (email/password). Set **role** to `designer` for people who publish, or `developer` for read-only. There is no public signup.
-2. Sign in to the app with that user (designers can manage; developers view).
-3. Point the Figma plugin at your server — designers sign in with the same email/password (see below).
+1. Admin → **Collections → `users` → OAuth2** — enable **Microsoft** with your
+   Azure AD client ID/secret (redirect URI `http://localhost:8090/oauth/callback`
+   for local Docker). Keep password auth enabled until Microsoft login is verified.
+2. Sign in from the Figma plugin with **Sign in with Microsoft**. First-time
+   Microsoft users are created as `developer`; promote publishers to `designer`
+   in Admin → Collections → `users`.
+3. Web app `/login` still accepts email/password (and Admin) for ops. Point the
+   plugin at your server via `VITE_API_URL` / `VITE_APP_URL` (see `plugin/`).
 
-On first start the container runs `pocketbase migrate up`, which creates all collections (`projects`, `sections`, `frames`, `layers`, `layer_details`, `foundations`, `feedback`, plus the `users.role` field). Rebuild after schema/migration changes so Docker picks them up:
+On first start the container runs `pocketbase migrate up`, which creates all collections (`projects`, `sections`, `frames`, `layers`, `layer_details`, `foundations`, `feedback`, `oauth_sessions`, plus the `users.role` field). Rebuild after schema/migration changes so Docker picks them up:
 
 ```bash
 docker compose up -d --build
@@ -101,6 +106,7 @@ Copy `.env.example` only if you need these:
 cd plugin
 cp .env.example .env
 # set VITE_API_URL to your PocketBase origin, e.g. http://localhost:8090
+# optional VITE_APP_URL when the web app is on a different origin (e.g. Vite :5173)
 # for a remote host, also add that origin to manifest.json → networkAccess.allowedDomains
 npm install
 npm run build
@@ -108,7 +114,7 @@ npm run build
 
 In Figma Desktop: **Plugins → Development → Import plugin from manifest…** → select `plugin/manifest.json`.
 
-Auth: sign in with a `users` account that has **role `designer`** (same email/password as the web app). Details in [`plugin/README.md`](plugin/README.md).
+Auth: **Sign in with Microsoft** (Azure AD must be configured on PocketBase `users` OAuth2). Only `role = designer` can publish. Details in [`plugin/README.md`](plugin/README.md).
 
 ---
 

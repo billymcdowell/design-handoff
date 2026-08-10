@@ -12,6 +12,9 @@ export default defineConfig(({ mode }) => {
       "import.meta.env.VITE_API_URL": JSON.stringify(
         env.VITE_API_URL || "http://localhost:8090",
       ),
+      "import.meta.env.VITE_APP_URL": JSON.stringify(
+        env.VITE_APP_URL || env.VITE_API_URL || "http://localhost:8090",
+      ),
     },
     plugins: [react(), viteSingleFile()],
     build: {

@@ -16,6 +16,7 @@ export function App() {
   // 7.1 — state
   const [token, setToken] = useState<string | null>(null)
   const [displayName, setDisplayName] = useState<string | null>(null)
+  const [canPublish, setCanPublish] = useState(false)
   const [loading, setLoading] = useState(true)
   const [selectionCount, setSelectionCount] = useState(0)
   const [isPublishing, setIsPublishing] = useState(false)
@@ -25,8 +26,6 @@ export function App() {
   const [projects, setProjects] = useState<Project[]>([])
   const [selectedProjectId, setSelectedProjectId] = useState("")
   const [loadingProjects, setLoadingProjects] = useState(false)
-  const [email, setEmail] = useState("")
-  const [password, setPassword] = useState("")
   const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(
     null,
   )
@@ -67,19 +66,21 @@ export function App() {
         if (newToken) {
           setToken(newToken)
           setDisplayName((msg.displayName as string | undefined) || "User")
+          setCanPublish(msg.canPublish === true)
           setLoading(false)
           setAuthError(null)
-          setPassword("")
           setLoadingProjects(true)
           setTimeout(() => post({ type: "FETCH_PROJECTS", token: newToken }), 100)
         } else {
           const errMsg = msg.error as string | undefined
-          if (errMsg) setAuthError(errMsg)
+          if (errMsg && errMsg !== "Sign-in cancelled.") setAuthError(errMsg)
+          else if (errMsg === "Sign-in cancelled.") setAuthError(null)
           else if (!loadingRef.current && isAuthenticatingRef.current) {
-            setAuthError("Invalid email or password. Please try again.")
+            setAuthError("Microsoft sign-in failed. Please try again.")
           }
           setToken(null)
           setDisplayName(null)
+          setCanPublish(false)
           setLoading(false)
           setSelectedProjectId("")
           setProjects([])
@@ -194,21 +195,26 @@ export function App() {
   const framesUsed = selectedProject?.frameCount ?? 0
 
   // ── Handlers ────────────────────────────────────────────────────────────────
-  async function handleLogin() {
-    const trimmedEmail = email.trim()
-    if (!trimmedEmail || !password) {
-      post({
-        type: "NOTIFY",
-        message: "❌ Enter your email and password",
-      })
-      return
-    }
+  function handleMicrosoftLogin() {
     setIsAuthenticating(true)
     setAuthError(null)
-    post({ type: "LOGIN", email: trimmedEmail, password })
+    post({ type: "LOGIN_MICROSOFT" })
+  }
+
+  function handleCancelLogin() {
+    post({ type: "CANCEL_LOGIN" })
+    setIsAuthenticating(false)
   }
 
   function handlePublish() {
+    if (!canPublish) {
+      post({
+        type: "NOTIFY",
+        message:
+          "❌ This account is read-only. Ask an admin to set your role to designer.",
+      })
+      return
+    }
     if (!selectedProjectId) {
       post({ type: "NOTIFY", message: "❌ Please select a project first" })
       return
@@ -225,6 +231,14 @@ export function App() {
   }
 
   function handleExportFoundational() {
+    if (!canPublish) {
+      post({
+        type: "NOTIFY",
+        message:
+          "❌ This account is read-only. Ask an admin to set your role to designer.",
+      })
+      return
+    }
     setIsExporting(true)
     setFoundationsNote(null)
     post({ type: "EXPORT_FOUNDATIONAL" })
@@ -234,13 +248,13 @@ export function App() {
     post({ type: "LOGOUT" })
     setToken(null)
     setDisplayName(null)
+    setCanPublish(false)
     setProjects([])
     setSelectedProjectId("")
     setUploadProgress(null)
     setIsPublishing(false)
     setIsExporting(false)
     setAuthError(null)
-    setPassword("")
     setFoundationsNote(null)
   }
 
@@ -249,11 +263,8 @@ export function App() {
   if (!token)
     return (
       <LoginView
-        email={email}
-        setEmail={setEmail}
-        password={password}
-        setPassword={setPassword}
-        onLogin={handleLogin}
+        onLogin={handleMicrosoftLogin}
+        onCancel={handleCancelLogin}
         isAuthenticating={isAuthenticating}
         authError={authError}
       />
@@ -270,6 +281,7 @@ export function App() {
       selectionCount={selectionCount}
       framesUsed={framesUsed}
       displayName={displayName || "User"}
+      canPublish={canPublish}
       isPublishing={isPublishing}
       isExporting={isExporting}
       foundationsNote={foundationsNote}
@@ -291,68 +303,42 @@ function LoadingView() {
 }
 
 function LoginView(props: {
-  email: string
-  setEmail: (v: string) => void
-  password: string
-  setPassword: (v: string) => void
   onLogin: () => void
+  onCancel: () => void
   isAuthenticating: boolean
   authError: string | null
 }) {
-  const {
-    email,
-    setEmail,
-    password,
-    setPassword,
-    onLogin,
-    isAuthenticating,
-    authError,
-  } = props
-  const disabled =
-    !email.trim() || !password || isAuthenticating
+  const { onLogin, onCancel, isAuthenticating, authError } = props
   return (
     <div className="view">
       <h1>Design Handoff</h1>
       <p>
-        Sign in with your designer account. An admin creates accounts in
-        PocketBase with role <strong>designer</strong>.
+        Sign in with Microsoft. Only accounts with role{" "}
+        <strong>designer</strong> can publish; developers can sign in
+        read-only.
       </p>
-      <div>
-        <label htmlFor="email">Email</label>
-        <input
-          id="email"
-          type="email"
-          autoComplete="username"
-          placeholder="designer@example.com"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") onLogin()
-          }}
-        />
-      </div>
-      <div>
-        <label htmlFor="password">Password</label>
-        <input
-          id="password"
-          type="password"
-          autoComplete="current-password"
-          placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") onLogin()
-          }}
-        />
-      </div>
       {authError && <div className="error small">{authError}</div>}
-      <button className="primary" disabled={disabled} onClick={onLogin}>
-        {isAuthenticating ? "Signing in..." : "Sign in"}
-      </button>
+      {isAuthenticating ? (
+        <>
+          <p className="small">
+            Waiting for Microsoft sign-in in your browser…
+          </p>
+          <button className="primary" disabled>
+            Signing in…
+          </button>
+          <button type="button" onClick={onCancel}>
+            Cancel
+          </button>
+        </>
+      ) : (
+        <button className="primary" onClick={onLogin}>
+          Sign in with Microsoft
+        </button>
+      )}
       <div className="spacer" />
       <p className="small">
-        Admin → Collections → users → New record → role designer. PocketBase
-        must be reachable at the plugin API URL.
+        A browser window will open to complete sign-in. New Microsoft accounts
+        are provisioned as developer until an admin promotes them in PocketBase.
       </p>
     </div>
   )
@@ -366,6 +352,7 @@ function DashboardView(props: {
   selectionCount: number
   framesUsed: number
   displayName: string
+  canPublish: boolean
   isPublishing: boolean
   isExporting: boolean
   foundationsNote: string | null
@@ -381,6 +368,7 @@ function DashboardView(props: {
     selectionCount,
     framesUsed,
     displayName,
+    canPublish,
     isPublishing,
     isExporting,
     foundationsNote,
@@ -390,8 +378,8 @@ function DashboardView(props: {
   } = props
 
   const publishDisabled =
-    selectionCount === 0 || !selectedProjectId || isPublishing
-  const foundationalDisabled = isExporting
+    !canPublish || selectionCount === 0 || !selectedProjectId || isPublishing
+  const foundationalDisabled = !canPublish || isExporting
 
   return (
     <div className="view">
@@ -399,6 +387,13 @@ function DashboardView(props: {
         <h1>Design Handoff Project</h1>
         <span className="badge">Beta</span>
       </div>
+
+      {!canPublish && (
+        <div className="error small">
+          This account is read-only (developer). Ask an admin to set your role
+          to designer to publish.
+        </div>
+      )}
 
       <div>
         <label htmlFor="project">Select Project</label>

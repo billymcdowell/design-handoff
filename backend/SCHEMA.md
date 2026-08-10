@@ -31,12 +31,19 @@ Built-in auth collections:
 
 | Who | Collection | Login |
 | --- | --- | --- |
-| Designers | `users` (`role: designer`) | Email/password — publish from Figma plugin; manage in the web app |
-| Developers | `users` (`role: developer`) | Email/password — read + copy only |
+| Designers | `users` (`role: designer`) | Microsoft OAuth2 (plugin) / email+password (web, until cutover) — publish from Figma plugin; manage in the web app |
+| Developers | `users` (`role: developer`) | Same — read + copy only; plugin signs in but cannot publish |
 | PocketBase Admin | `_superusers` | Admin UI (`/_/`) only — ops / schema; not required for day-to-day publishing |
 
-Create accounts in Admin → Collections → `users`. Set **role** to `designer`
-or `developer`. There is no public signup.
+**Plugin auth** uses Microsoft OAuth2 via a browser relay (`/oauth/start` →
+Entra ID → `/oauth/callback`) and a short-lived `oauth_sessions` record. New
+Microsoft users are auto-provisioned as `developer` (see `pb_hooks/main.pb.js`);
+an admin must set **role** to `designer` before they can publish. OAuth cannot
+self-escalate role (update rule locks `role` against self-change).
+
+Web app `/login` still supports email/password (and Admin `_superusers`) for
+ops. Disable password auth on `users` in PocketBase Admin only after Microsoft
+login is verified end-to-end.
 
 ```
 _superusers  →  PocketBase Admin (API rules bypassed; ops only)
@@ -143,6 +150,19 @@ project reads the same foundations.
 Any authenticated user can **create** (with `author = @request.auth.id`, or
 Admin via a linked `users` row). List / view / update / delete are Admin-only
 (null rules — review in Admin UI → Collections → `feedback`).
+
+### 8. `oauth_sessions` — one-time Microsoft OAuth relay for the Figma plugin
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `id` | text (15–64) | Client-generated capability token (plugin creates the record) |
+| `token` | text | Optional — PocketBase JWT written by `/oauth/callback` |
+| `created` | autodate | Used by cron TTL (~5 min) |
+
+API rules: create/view/delete are public (knowledge of `id` is auth); list is
+Admin-only; update requires an authenticated user (callback after Microsoft
+login). Hooks force empty `token` on create, reject a second update once set,
+and delete rows older than 5 minutes.
 
 ---
 

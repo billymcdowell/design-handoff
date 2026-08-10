@@ -16,19 +16,24 @@ field names (`project`, `frame`, `parent`, `layer`, `owner`).
 
 ## Auth
 
-Sign in with a **`users` account that has role `designer`** (email + password).
-The plugin calls PocketBase `auth-with-password`, stores the JWT in
-`figma.clientStorage`, and refreshes it on open via `auth-refresh`.
+Sign in with **Microsoft** (Entra ID). The plugin opens
+`${VITE_APP_URL}/oauth/start?session=…` in the system browser; after Microsoft
+login the web app writes a PocketBase JWT into a one-time `oauth_sessions`
+record and the plugin polls until it appears, then stores it in
+`figma.clientStorage`.
 
 Setup:
 
-1. Open PocketBase Admin (`http://localhost:8090/_/`)
-2. Collections → `users` → **New record**
-3. Set email, password, and **role = designer**
-4. Open the plugin and sign in with those credentials
+1. Register a single-tenant Azure AD app with redirect URI
+   `https://<app-origin>/oauth/callback` and scopes `openid email profile`
+2. PocketBase Admin → Collections → `users` → OAuth2 → enable **Microsoft**
+   (client ID/secret + tenant authority URLs)
+3. First Microsoft sign-in auto-provisions the user as **developer**; promote
+   publishers to **designer** in Admin
+4. Rebuild the plugin with `VITE_API_URL` / `VITE_APP_URL` pointing at your hosts
 
-Developer accounts (`role = developer`) can view the web app but cannot publish
-from the plugin.
+Designer accounts can publish. Developer accounts can sign in read-only (publish
+buttons disabled; PocketBase API rules still reject writes).
 
 **Foundations:** `foundations.owner` must be a `users` record id. A designer
 login already uses that id, so ownership maps directly.
@@ -43,8 +48,8 @@ replaced on the next sync (no backwards compatibility).
 
 | Thread | Responsibility |
 | --- | --- |
-| `src/main/*` | Figma extraction (CSS engine, PNG export, foundational export) **and** all PocketBase record writes via raw `fetch` (no CORS in the sandbox; frame PNGs attached via hand-built multipart since `FormData` is unavailable). |
-| `src/ui/*` | React UI (login / dashboard / progress). Relays email/password to the main thread for auth. |
+| `src/main/*` | Figma extraction (CSS engine, PNG export, foundational export) **and** all PocketBase record writes via raw `fetch` (no CORS in the sandbox; frame PNGs attached via hand-built multipart since `FormData` is unavailable). Opens the system browser for Microsoft OAuth and polls `oauth_sessions`. |
+| `src/ui/*` | React UI (Microsoft login / dashboard / progress). Relays `LOGIN_MICROSOFT` to the main thread. |
 
 Data flow on publish: `PUBLISH → createBackendPayload → DATA_READY_FOR_UPLOAD →
 UPLOAD_DATA → project (PATCH) → frames → layers (by depth) → layer_details →
@@ -66,10 +71,10 @@ pick `manifest.json`.
 - `npm run typecheck` — type-check without emitting.
 
 `VITE_API_URL` defaults to `http://localhost:8090` (matches local PocketBase).
-Optional `VITE_APP_URL` sets the origin used for post-publish share links
-(defaults to `VITE_API_URL`). Local access is declared in
-`manifest.json → networkAccess.devAllowedDomains`
-(Figma rejects `127.0.0.1` — use `localhost` only). When pointing at a
+`VITE_APP_URL` is the web origin for Microsoft OAuth and share links (defaults
+to `VITE_API_URL`). When the Vite frontend runs on `:5173` in dev, set
+`VITE_APP_URL=http://localhost:5173`. Local access is declared in
+`manifest.json → networkAccess.devAllowedDomains`. When pointing at a
 non-local host, add its origin to `networkAccess.allowedDomains`.
 
 After a successful publish, the plugin lists a copyable viewer URL for each
