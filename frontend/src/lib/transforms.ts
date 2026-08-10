@@ -1,4 +1,10 @@
-import type { Layer, LayerDetail } from "./types"
+import type {
+  ComponentVariantLayer,
+  ComponentVariantLayerDetail,
+  Layer,
+  LayerDetail,
+  LayerType,
+} from "./types"
 
 export type TransformedLayerDetail = {
   name: string
@@ -122,4 +128,47 @@ export function transformLayerDetail(
     },
     component: layerDetail?.component,
   }
+}
+
+/** Transform inlined component-variant inspect data into inspector shape. */
+export function transformVariantLayerInspect(
+  layer: ComponentVariantLayer,
+  detail?: ComponentVariantLayerDetail | null,
+): TransformedLayerDetail {
+  const syntheticLayer = {
+    id: layer.id,
+    collectionId: "",
+    collectionName: "",
+    created: "",
+    updated: "",
+    frame: "",
+    name: layer.name,
+    type: layer.type as LayerType,
+    x: layer.x,
+    y: layer.y,
+    width: layer.width,
+    height: layer.height,
+    clickable: layer.clickable,
+    sort_order: layer.sort_order,
+    figma_node_id: layer.figma_node_id ?? layer.id,
+    parent: layer.parent,
+  } satisfies Layer
+
+  const syntheticDetail = detail
+    ? ({
+        id: layer.id,
+        collectionId: "",
+        collectionName: "",
+        created: "",
+        updated: "",
+        layer: layer.id,
+        layout: detail.layout,
+        styles: detail.styles,
+        typography: detail.typography,
+        code: detail.code,
+        component: detail.component,
+      } satisfies LayerDetail)
+    : null
+
+  return transformLayerDetail(syntheticLayer, syntheticDetail)!
 }

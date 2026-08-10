@@ -2,8 +2,14 @@
 
 // ─── Component library sync: local COMPONENT / COMPONENT_SET → PocketBase ───
 
-import type { TokenRef } from "../types"
+import type { Layer, LayerDetail, TokenRef } from "../types"
+import {
+  isNodeVisibleInFrame,
+  nodeToLayer,
+  nodeToLayerDetail,
+} from "./cssEngine"
 import { getFoundationFileIdentity } from "./foundational"
+import { resolvePageName } from "./publish"
 
 const HISTORY_CAP = 50
 export const COMPONENT_LIBRARIES_DATA_VERSION = 1 as const
@@ -15,17 +21,66 @@ export interface LibraryComponentVariant {
   figma_node_id: string
 }
 
+/** Flattened overlay row persisted on library_component_variants.layers */
+export interface ExtractedVariantLayer {
+  id: string
+  parent?: string
+  name: string
+  type: string
+  x: number
+  y: number
+  width: number
+  height: number
+  clickable: boolean
+  sort_order: number
+  figma_node_id: string
+}
+
+export interface ExtractedVariantLayerDetail {
+  layout: LayerDetail["layout"]
+  styles: LayerDetail["styles"]
+  typography: LayerDetail["typography"]
+  code: LayerDetail["code"]
+  component?: LayerDetail["component"]
+}
+
+export interface ExtractedLibraryComponentVariant {
+  key: string
+  name: string
+  properties: Record<string, string>
+  figma_node_id: string
+  is_default: boolean
+  width: number
+  height: number
+  layers: ExtractedVariantLayer[]
+  layer_details: Record<string, ExtractedVariantLayerDetail>
+  content_hash: string
+  previewBytes: Uint8Array
+  previewFileName: string
+}
+
 export interface ExtractedLibraryComponent {
   key: string
   name: string
   kind: "COMPONENT" | "COMPONENT_SET"
   figma_node_id: string
+  page_name: string
+  hidden: boolean
   description: string
+  /** Slim summary mirrored to library_components.variants */
   variants: LibraryComponentVariant[]
+  /** Full per-variant preview + inspect payload */
+  variantPayloads: ExtractedLibraryComponentVariant[]
   tokens_used: TokenRef[]
   content_hash: string
   previewBytes: Uint8Array
   previewFileName: string
+}
+
+export function isHiddenName(name: string | undefined | null): boolean {
+  if (!name) return false
+  const trimmed = name.trim()
+  return trimmed.startsWith(".") || trimmed.startsWith("_")
 }
 
 export interface ComponentLibrarySourceMeta {
@@ -218,16 +273,19 @@ async function collectTokensUsed(root: SceneNode): Promise<TokenRef[]> {
   return Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name))
 }
 
-async function walkPages(visit: (node: SceneNode) => void): Promise<void> {
+async function walkPages(
+  visit: (node: SceneNode, pageName: string) => void,
+): Promise<void> {
   // manifest.json uses documentAccess: "dynamic-page" — pages must be loaded
   // before reading `.children`.
   await figma.loadAllPagesAsync()
   for (const page of figma.root.children) {
     if (page.type !== "PAGE") continue
+    const pageName = page.name
     const stack: SceneNode[] = [...page.children]
     while (stack.length > 0) {
       const node = stack.pop()!
-      visit(node)
+      visit(node, pageName)
       if ("children" in node) {
         for (const child of node.children) stack.push(child)
       }
@@ -235,18 +293,21 @@ async function walkPages(visit: (node: SceneNode) => void): Promise<void> {
   }
 }
 
+export interface LibraryRootEntry {
+  node: ComponentNode | ComponentSetNode
+  pageName: string
+}
+
 /** Top-level library entries: COMPONENT_SETs and standalone COMPONENTs. */
-export async function findLibraryRoots(): Promise<
-  Array<ComponentNode | ComponentSetNode>
-> {
-  const roots: Array<ComponentNode | ComponentSetNode> = []
-  await walkPages((node) => {
+export async function findLibraryRoots(): Promise<LibraryRootEntry[]> {
+  const roots: LibraryRootEntry[] = []
+  await walkPages((node, pageName) => {
     if (node.type === "COMPONENT_SET") {
-      roots.push(node)
+      roots.push({ node, pageName })
     } else if (node.type === "COMPONENT") {
       const parent = node.parent
       if (!parent || parent.type !== "COMPONENT_SET") {
-        roots.push(node)
+        roots.push({ node, pageName })
       }
     }
   })
@@ -274,11 +335,136 @@ function variantPropertiesOf(component: ComponentNode): Record<string, string> {
   }
 }
 
+function flattenVariantLayers(tree: Layer[]): ExtractedVariantLayer[] {
+  const out: ExtractedVariantLayer[] = []
+
+  function walk(nodes: Layer[], parentId: string | undefined) {
+    nodes.forEach((layer, siblingIndex) => {
+      out.push({
+        id: layer.id,
+        ...(parentId ? { parent: parentId } : {}),
+        name: layer.name,
+        type: layer.type,
+        x: layer.x,
+        y: layer.y,
+        width: layer.width,
+        height: layer.height,
+        clickable: layer.clickable,
+        sort_order: siblingIndex,
+        figma_node_id: layer.id,
+      })
+      if (layer.children && layer.children.length > 0) {
+        walk(layer.children, layer.id)
+      }
+    })
+  }
+
+  walk(tree, undefined)
+  return out
+}
+
+async function collectLayerDetailsRecursively(
+  node: SceneNode,
+  root: SceneNode,
+  sink: Record<string, ExtractedVariantLayerDetail>,
+): Promise<void> {
+  if (!isNodeVisibleInFrame(node, root)) return
+
+  const detail = await nodeToLayerDetail(node, root)
+  if (detail) {
+    sink[detail.id] = {
+      layout: detail.layout,
+      styles: detail.styles,
+      typography: detail.typography,
+      code: detail.code,
+      ...(detail.component ? { component: detail.component } : {}),
+    }
+  }
+
+  if ("children" in node && node.children.length > 0) {
+    await Promise.all(
+      node.children.map((child) =>
+        collectLayerDetailsRecursively(child, root, sink),
+      ),
+    )
+  }
+}
+
+async function extractVariantPayload(
+  component: ComponentNode,
+  isDefault: boolean,
+): Promise<ExtractedLibraryComponentVariant> {
+  let key = ""
+  try {
+    key = component.key
+  } catch {
+    key = component.id
+  }
+
+  const width = Math.round(component.width)
+  const height = Math.round(component.height)
+
+  let layersTree: Layer[] = []
+  if ("children" in component && component.children.length > 0) {
+    const visibleChildren = component.children.filter((child) =>
+      isNodeVisibleInFrame(child, component),
+    )
+    layersTree = visibleChildren
+      .map((child) => nodeToLayer(child, component))
+      .filter((l): l is Layer => l !== null)
+  }
+
+  const layers = flattenVariantLayers(layersTree)
+  const layer_details: Record<string, ExtractedVariantLayerDetail> = {}
+  if ("children" in component && component.children.length > 0) {
+    const visibleChildren = component.children.filter((child) =>
+      isNodeVisibleInFrame(child, component),
+    )
+    await Promise.all(
+      visibleChildren.map((child) =>
+        collectLayerDetailsRecursively(child, component, layer_details),
+      ),
+    )
+  }
+
+  const previewBytes = await exportPreview(component)
+  const properties = variantPropertiesOf(component)
+  const content_hash = `${fnv1aHex(
+    stableStringify({
+      key,
+      name: component.name,
+      properties,
+      width,
+      height,
+      layers,
+      layer_details,
+    }),
+  )}_${fnv1aHex(previewBytes)}_${previewBytes.length}`
+
+  return {
+    key,
+    name: component.name,
+    properties,
+    figma_node_id: component.id,
+    is_default: isDefault,
+    width,
+    height,
+    layers,
+    layer_details,
+    content_hash,
+    previewBytes,
+    previewFileName: `${key.slice(0, 24)}.png`,
+  }
+}
+
 function computeContentHash(args: {
   name: string
   kind: "COMPONENT" | "COMPONENT_SET"
   description: string
+  page_name: string
+  hidden: boolean
   variants: LibraryComponentVariant[]
+  variantHashes: string[]
   tokens_used: TokenRef[]
   previewBytes: Uint8Array
 }): string {
@@ -286,7 +472,10 @@ function computeContentHash(args: {
     name: args.name,
     kind: args.kind,
     description: args.description,
+    page_name: args.page_name,
+    hidden: args.hidden,
     variants: args.variants,
+    variantHashes: args.variantHashes,
     tokens_used: args.tokens_used,
   })
   return `${fnv1aHex(meta)}_${fnv1aHex(args.previewBytes)}_${args.previewBytes.length}`
@@ -294,6 +483,7 @@ function computeContentHash(args: {
 
 async function extractOne(
   node: ComponentNode | ComponentSetNode,
+  pageName: string,
 ): Promise<ExtractedLibraryComponent> {
   const kind: "COMPONENT" | "COMPONENT_SET" =
     node.type === "COMPONENT_SET" ? "COMPONENT_SET" : "COMPONENT"
@@ -301,9 +491,9 @@ async function extractOne(
     "description" in node && typeof node.description === "string"
       ? node.description
       : ""
-
-  let variants: LibraryComponentVariant[] = []
-  let previewNode: SceneNode = node
+  const resolvedPage =
+    pageName || resolvePageName(node) || "Uncategorized"
+  const hidden = isHiddenName(node.name) || isHiddenName(resolvedPage)
 
   let nodeKey: string
   try {
@@ -313,49 +503,77 @@ async function extractOne(
     throw new Error(`Cannot read key for “${node.name}”: ${message}`)
   }
 
+  const componentNodes: ComponentNode[] = []
+  let defaultKey = ""
+
   if (node.type === "COMPONENT_SET") {
     const children = node.children.filter(
       (c): c is ComponentNode => c.type === "COMPONENT",
     )
-    variants = children.map((c) => {
-      let childKey = ""
-      try {
-        childKey = c.key
-      } catch {
-        childKey = c.id
-      }
-      return {
-        key: childKey,
-        name: c.name,
-        properties: variantPropertiesOf(c),
-        figma_node_id: c.id,
-      }
-    })
+    componentNodes.push(...children)
     try {
       const def = node.defaultVariant
-      if (def) previewNode = def
-      else if (children[0]) previewNode = children[0]
+      if (def) {
+        try {
+          defaultKey = def.key
+        } catch {
+          defaultKey = def.id
+        }
+      }
     } catch {
-      if (children[0]) previewNode = children[0]
+      /* keep empty — fall through to first child */
+    }
+    if (!defaultKey && children[0]) {
+      try {
+        defaultKey = children[0].key
+      } catch {
+        defaultKey = children[0].id
+      }
     }
   } else {
-    variants = [
-      {
-        key: nodeKey,
-        name: node.name,
-        properties: variantPropertiesOf(node),
-        figma_node_id: node.id,
-      },
-    ]
+    componentNodes.push(node)
+    defaultKey = nodeKey
   }
 
+  const variantPayloads: ExtractedLibraryComponentVariant[] = []
+  for (const child of componentNodes) {
+    let childKey = ""
+    try {
+      childKey = child.key
+    } catch {
+      childKey = child.id
+    }
+    variantPayloads.push(
+      await extractVariantPayload(child, childKey === defaultKey),
+    )
+  }
+
+  // Ensure exactly one default when possible
+  if (variantPayloads.length > 0 && !variantPayloads.some((v) => v.is_default)) {
+    variantPayloads[0].is_default = true
+  }
+
+  const variants: LibraryComponentVariant[] = variantPayloads.map((v) => ({
+    key: v.key,
+    name: v.name,
+    properties: v.properties,
+    figma_node_id: v.figma_node_id,
+  }))
+
+  const defaultVariant =
+    variantPayloads.find((v) => v.is_default) ?? variantPayloads[0]
+  const previewBytes = defaultVariant?.previewBytes ?? (await exportPreview(node))
+  const previewFileName = `${nodeKey.slice(0, 24)}.png`
+
   const tokens_used = await collectTokensUsed(node)
-  const previewBytes = await exportPreview(previewNode)
   const content_hash = computeContentHash({
     name: node.name,
     kind,
     description,
+    page_name: resolvedPage,
+    hidden,
     variants,
+    variantHashes: variantPayloads.map((v) => v.content_hash),
     tokens_used,
     previewBytes,
   })
@@ -365,12 +583,15 @@ async function extractOne(
     name: node.name,
     kind,
     figma_node_id: node.id,
+    page_name: resolvedPage,
+    hidden,
     description,
     variants,
+    variantPayloads,
     tokens_used,
     content_hash,
     previewBytes,
-    previewFileName: `${nodeKey.slice(0, 24)}.png`,
+    previewFileName,
   }
 }
 
@@ -386,13 +607,13 @@ export async function extractLibraryComponents(
   const roots = await findLibraryRoots()
   const components: ExtractedLibraryComponent[] = []
   for (let i = 0; i < roots.length; i++) {
-    const root = roots[i]
-    onProgress?.(i + 1, roots.length, root.name)
+    const { node, pageName } = roots[i]
+    onProgress?.(i + 1, roots.length, node.name)
     try {
-      components.push(await extractOne(root))
+      components.push(await extractOne(node, pageName))
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      throw new Error(`Failed to export component “${root.name}”: ${message}`)
+      throw new Error(`Failed to export component “${node.name}”: ${message}`)
     }
   }
   components.sort((a, b) => a.name.localeCompare(b.name))

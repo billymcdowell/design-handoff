@@ -27,6 +27,14 @@ export function libraryComponentPreviewSrc(
   return fileUrl(component, component.preview)
 }
 
+/** Preview image for a library component variant. */
+export function libraryComponentVariantPreviewSrc(
+  variant: { id: string; collectionId: string; preview?: string },
+): string | undefined {
+  if (!variant.preview) return undefined
+  return fileUrl(variant, variant.preview)
+}
+
 /** Same resolution order for project thumbnails. */
 export function projectThumbnailSrc(project: Project): string | undefined {
   if (project.thumbnail_url) return project.thumbnail_url

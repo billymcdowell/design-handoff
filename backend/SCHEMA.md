@@ -52,6 +52,7 @@ users        →  designers (write) + developers (read-only)
 foundations  →  single-tenant singleton (slug=default); not per-user
 component_libraries → singleton meta (slug=default) for library sync
 library_components  → one row per synced COMPONENT / COMPONENT_SET
+library_component_variants → per-variant preview + inspect layers
 ```
 
 `projects.owner` always references a `users` id. When an
@@ -170,8 +171,10 @@ Developers (and all authenticated users) can read it.
 | `kind` | select | `COMPONENT` \| `COMPONENT_SET` |
 | `file_key` / `file_name` | text | source Figma file |
 | `figma_node_id` | text | optional — deep link target (max 512) |
+| `page_name` | text | Figma page the component lives on |
+| `hidden` | bool | true when name or page starts with `.` / `_` |
 | `preview` | file | default variant / set thumbnail |
-| `variants` | json | `[{ key, name, properties, figma_node_id }]` |
+| `variants` | json | slim summary `[{ key, name, properties, figma_node_id }]` |
 | `tokens_used` | json | `[{ id, name }]` bound variables/styles |
 | `description` | text | Figma description (editable docs later) |
 | `content_hash` | text | skip no-op sync upserts |
@@ -179,7 +182,25 @@ Developers (and all authenticated users) can read it.
 Re-sync from the same file upserts by `key` and deletes keys that disappeared
 from that file’s slice (tracked via `component_libraries.data.sources`).
 
-### 9. `feedback` — product feedback about Design Handoff
+### 9. `library_component_variants` — per-variant preview + inspect payload
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `library_component` | relation → `library_components` | required, cascade delete |
+| `key` | text | Figma variant / standalone component key |
+| `name` | text | variant display name |
+| `properties` | json | variant property map |
+| `figma_node_id` | text | optional deep link target |
+| `is_default` | bool | default variant for catalog thumbnail |
+| `preview` | file | PNG export of this variant |
+| `width` / `height` | number | design px for overlay alignment |
+| `layers` | json | flattened overlay rows (x/y/w/h, parent, figma_node_id) |
+| `layer_details` | json | map of figma node id → layout/styles/typography/code/component |
+| `content_hash` | text | skip no-op variant upserts |
+
+Unique on `(library_component, key)`.
+
+### 10. `feedback` — product feedback about Design Handoff
 
 | Field | Type | Notes |
 | --- | --- | --- |
@@ -192,7 +213,7 @@ Any authenticated user can **create** (with `author = @request.auth.id`, or
 Admin via a linked `users` row). List / view / update / delete are Admin-only
 (null rules — review in Admin UI → Collections → `feedback`).
 
-### 10. `oauth_sessions` — one-time Microsoft OAuth relay for the Figma plugin
+### 11. `oauth_sessions` — one-time Microsoft OAuth relay for the Figma plugin
 
 | Field | Type | Notes |
 | --- | --- | --- |
@@ -356,6 +377,7 @@ All authenticated users can **list/view** every record. Mutations require
 | `foundations` | any authed user | designer only (singleton `slug=default`) |
 | `component_libraries` | any authed user | designer only (singleton `slug=default`) |
 | `library_components` | any authed user | designer only |
+| `library_component_variants` | any authed user | designer only |
 | `feedback` | Admin only | create: any authed user (`author = self`, or Admin); update/delete: Admin only |
 
 ---
@@ -380,6 +402,10 @@ docker compose up -d --build
 `1785667200_component_libraries.js` adds `component_libraries` (singleton
 meta) and `library_components` (per-component rows with preview files).
 
+`1785667400_library_component_variants.js` adds `page_name` / `hidden` on
+`library_components` and the `library_component_variants` collection (per-variant
+preview + inspect JSON). Re-sync components from Figma afterward.
+
 `1785667300_figma_node_id_max_length.js` raises `figma_node_id` max from 64
 to 512 on `layers` and `library_components` (nested instance ids exceeded 64).
 
@@ -398,7 +424,7 @@ timeout 30s) so the plugin can chunk layer / layer_detail creates.
 1. Open Admin → **Settings → Import collections**
 2. Upload [`schema.json`](schema.json) (same contents as `pb_collections_import.json`)
 3. Leave **Delete missing collections** unchecked (keeps the built-in `users` collection and merges fields)
-4. Confirm — this adds `projects` / `sections` / `frames` / `layers` / `layer_details` / `foundations` / `component_libraries` / `library_components` / `feedback` **and** the `users.role` field (`designer` | `developer`)
+4. Confirm — this adds `projects` / `sections` / `frames` / `layers` / `layer_details` / `foundations` / `component_libraries` / `library_components` / `library_component_variants` / `feedback` **and** the `users.role` field (`designer` | `developer`)
 
 Then create login users as needed:
 

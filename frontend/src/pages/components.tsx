@@ -76,6 +76,32 @@ export default function ComponentsPage() {
   )
   const list = components ?? []
 
+  const { pageGroups, hiddenComponents } = useMemo(() => {
+    const hidden: LibraryComponent[] = []
+    const byPage = new Map<string, LibraryComponent[]>()
+
+    for (const component of list) {
+      if (component.hidden) {
+        hidden.push(component)
+        continue
+      }
+      const page = component.page_name?.trim() || "Uncategorized"
+      const bucket = byPage.get(page)
+      if (bucket) bucket.push(component)
+      else byPage.set(page, [component])
+    }
+
+    const pages = Array.from(byPage.entries())
+      .map(([pageName, items]) => ({
+        pageName,
+        items: [...items].sort((a, b) => a.name.localeCompare(b.name)),
+      }))
+      .sort((a, b) => a.pageName.localeCompare(b.pageName))
+
+    hidden.sort((a, b) => a.name.localeCompare(b.name))
+    return { pageGroups: pages, hiddenComponents: hidden }
+  }, [list])
+
   async function handleRemoveSource(source: ComponentLibrarySource) {
     if (!library || !canEditComponents()) return
     setRemovingKey(source.fileKey)
@@ -173,17 +199,66 @@ export default function ComponentsPage() {
             </section>
           )}
 
-          <section className="flex flex-col gap-3">
+          <section className="flex flex-col gap-6">
             <h2 className="text-sm font-medium">Catalog</h2>
             {list.length === 0 ? (
               <p className="text-muted-foreground text-sm">
                 No components in the catalog yet.
               </p>
             ) : (
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {list.map((component) => (
-                  <ComponentCard key={component.id} component={component} />
+              <div className="flex flex-col gap-8">
+                {pageGroups.map((group) => (
+                  <div key={group.pageName} className="flex flex-col gap-3">
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-sm font-medium">{group.pageName}</h3>
+                      <Badge variant="secondary" className="text-[10px]">
+                        {group.items.length}
+                      </Badge>
+                    </div>
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                      {group.items.map((component) => (
+                        <ComponentCard
+                          key={component.id}
+                          component={component}
+                        />
+                      ))}
+                    </div>
+                  </div>
                 ))}
+
+                {pageGroups.length === 0 && hiddenComponents.length > 0 && (
+                  <p className="text-muted-foreground text-sm">
+                    All synced components are hidden. Expand Hidden below.
+                  </p>
+                )}
+
+                {hiddenComponents.length > 0 && (
+                  <Accordion className="border rounded-lg px-4">
+                    <AccordionItem value="hidden">
+                      <AccordionTrigger className="text-sm hover:no-underline">
+                        <span className="flex items-center gap-2">
+                          <span className="font-medium">Hidden</span>
+                          <Badge variant="outline" className="text-[10px]">
+                            {hiddenComponents.length}
+                          </Badge>
+                          <span className="text-muted-foreground font-normal text-xs">
+                            Names or pages starting with . or _
+                          </span>
+                        </span>
+                      </AccordionTrigger>
+                      <AccordionContent>
+                        <div className="grid grid-cols-1 gap-4 pb-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                          {hiddenComponents.map((component) => (
+                            <ComponentCard
+                              key={component.id}
+                              component={component}
+                            />
+                          ))}
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
+                  </Accordion>
+                )}
               </div>
             )}
           </section>
@@ -258,6 +333,11 @@ function ComponentCard({ component }: { component: LibraryComponent }) {
           <Badge variant="outline" className="text-[10px]">
             {component.kind === "COMPONENT_SET" ? "Set" : "Component"}
           </Badge>
+          {component.page_name && (
+            <Badge variant="outline" className="text-[10px]">
+              {component.page_name}
+            </Badge>
+          )}
           {variantCount > 0 && (
             <Badge variant="secondary" className="text-[10px]">
               {variantCount} variant{variantCount === 1 ? "" : "s"}

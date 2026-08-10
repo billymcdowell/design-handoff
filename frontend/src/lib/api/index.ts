@@ -14,6 +14,7 @@ import type {
   Layer,
   LayerDetail,
   LibraryComponent,
+  LibraryComponentVariantRecord,
   Project,
   Section,
 } from "../types"
@@ -322,6 +323,19 @@ export async function getLibraryComponentByKey(
   } catch {
     return null
   }
+}
+
+export async function listLibraryComponentVariants(
+  libraryComponentId: string,
+): Promise<LibraryComponentVariantRecord[]> {
+  if (!pb.authStore.isValid || !libraryComponentId) return []
+  return pb
+    .collection("library_component_variants")
+    .getFullList<LibraryComponentVariantRecord>({
+      filter: `library_component = "${escapeFilterValue(libraryComponentId)}"`,
+      sort: "name",
+      requestKey: null,
+    })
 }
 
 export async function updateComponentLibraryRecord(

@@ -9,6 +9,7 @@ import {
   formatComponentHistorySummary,
   planComponentSync,
   type ExistingLibraryComponentRow,
+  type ExtractedLibraryComponent,
 } from "./components"
 import {
   countCatalogTokens,
@@ -21,18 +22,78 @@ import { fetchProjectsFromApi, resolveProjectForPublish } from "./planLimits"
 import {
   assertCanPublish,
   createLibraryComponentRecord,
+  createLibraryComponentVariantRecord,
   deleteLibraryComponentRecord,
+  deleteLibraryComponentVariantRecord,
   findSharedComponentLibraryRecord,
   findSharedFoundationRecord,
   listLibraryComponentsByFileKey,
+  listLibraryComponentVariants,
   startMicrosoftLogin,
   updateLibraryComponentRecord,
+  updateLibraryComponentVariantRecord,
   upsertSharedComponentLibraryRecord,
   upsertSharedFoundationRecord,
   validateAuthToken,
 } from "./pbClient"
 import { createBackendPayload, isPublishableFrame } from "./publish"
 import { uploadData } from "./upload"
+
+async function syncLibraryComponentVariants(
+  token: string,
+  libraryComponentId: string,
+  component: ExtractedLibraryComponent,
+): Promise<void> {
+  const existing = await listLibraryComponentVariants(token, libraryComponentId)
+  const existingByKey = new Map(
+    existing.map((row) => [String(row.key ?? ""), row]),
+  )
+  const nextKeys = new Set(component.variantPayloads.map((v) => v.key))
+
+  for (const row of existing) {
+    const key = String(row.key ?? "")
+    if (!nextKeys.has(key)) {
+      await deleteLibraryComponentVariantRecord(token, String(row.id))
+    }
+  }
+
+  for (const variant of component.variantPayloads) {
+    const prev = existingByKey.get(variant.key)
+    const fields = {
+      library_component: libraryComponentId,
+      key: variant.key,
+      name: variant.name,
+      properties: variant.properties,
+      figma_node_id: variant.figma_node_id,
+      is_default: variant.is_default,
+      width: variant.width,
+      height: variant.height,
+      layers: variant.layers,
+      layer_details: variant.layer_details,
+      content_hash: variant.content_hash,
+    }
+    const preview = {
+      bytes: variant.previewBytes,
+      fileName: variant.previewFileName,
+    }
+
+    if (!prev) {
+      await createLibraryComponentVariantRecord(token, fields, preview)
+      continue
+    }
+
+    const prevHash =
+      typeof prev.content_hash === "string" ? prev.content_hash : undefined
+    if (prevHash === variant.content_hash) continue
+
+    await updateLibraryComponentVariantRecord(
+      token,
+      String(prev.id),
+      fields,
+      preview,
+    )
+  }
+}
 
 figma.showUI(__html__, { width: 400, height: 600, themeColors: true })
 
@@ -524,7 +585,7 @@ figma.ui.onmessage = async (msg: Msg) => {
         }
 
         for (const component of plan.toCreate) {
-          await createLibraryComponentRecord(
+          const created = await createLibraryComponentRecord(
             authToken,
             {
               key: component.key,
@@ -533,6 +594,8 @@ figma.ui.onmessage = async (msg: Msg) => {
               file_key: fileKey,
               file_name: fileName,
               figma_node_id: component.figma_node_id,
+              page_name: component.page_name,
+              hidden: component.hidden,
               variants: component.variants,
               tokens_used: component.tokens_used,
               description: component.description,
@@ -542,6 +605,11 @@ figma.ui.onmessage = async (msg: Msg) => {
               bytes: component.previewBytes,
               fileName: component.previewFileName,
             },
+          )
+          await syncLibraryComponentVariants(
+            authToken,
+            String(created.id),
+            component,
           )
         }
 
@@ -556,6 +624,8 @@ figma.ui.onmessage = async (msg: Msg) => {
               file_key: fileKey,
               file_name: fileName,
               figma_node_id: component.figma_node_id,
+              page_name: component.page_name,
+              hidden: component.hidden,
               variants: component.variants,
               tokens_used: component.tokens_used,
               description: component.description,
@@ -566,6 +636,7 @@ figma.ui.onmessage = async (msg: Msg) => {
               fileName: component.previewFileName,
             },
           )
+          await syncLibraryComponentVariants(authToken, existingId, component)
         }
 
         await upsertSharedComponentLibraryRecord(authToken, {

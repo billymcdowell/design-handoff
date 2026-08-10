@@ -802,6 +802,8 @@ export interface LibraryComponentFields {
   file_key: string
   file_name: string
   figma_node_id?: string
+  page_name?: string
+  hidden?: boolean
   variants?: unknown
   tokens_used?: unknown
   description?: string
@@ -909,6 +911,136 @@ export async function deleteLibraryComponentRecord(
   id: string,
 ): Promise<void> {
   const res = await fetch(recordsUrl("library_components", id), {
+    method: "DELETE",
+    headers: { ...authHeaders(token), "Content-Type": "application/json" },
+  })
+  if (!res.ok && res.status !== 404) {
+    throw new Error(await pbErrorMessage(res))
+  }
+}
+
+// ─── library_component_variants ──────────────────────────────────────────────
+
+export interface LibraryComponentVariantFields {
+  library_component: string
+  key: string
+  name: string
+  properties?: unknown
+  figma_node_id?: string
+  is_default?: boolean
+  width?: number
+  height?: number
+  layers?: unknown
+  layer_details?: unknown
+  content_hash?: string
+}
+
+export async function listLibraryComponentVariants(
+  token: string,
+  libraryComponentId: string,
+): Promise<PBRecord[]> {
+  const filter = encodeURIComponent(
+    `library_component = "${escapeFilterValue(libraryComponentId)}"`,
+  )
+  const items: PBRecord[] = []
+  let page = 1
+  for (;;) {
+    const res = await fetch(
+      recordsUrl(
+        "library_component_variants",
+        undefined,
+        `page=${page}&perPage=200&filter=${filter}`,
+      ),
+      { headers: { ...authHeaders(token), "Content-Type": "application/json" } },
+    )
+    if (!res.ok) throw new Error(await pbErrorMessage(res))
+    const data = (await res.json()) as PBListResponse<PBRecord>
+    items.push(...data.items)
+    if (items.length >= data.totalItems || data.items.length === 0) break
+    page += 1
+  }
+  return items
+}
+
+async function upsertLibraryComponentVariantMultipart(
+  token: string,
+  method: "POST" | "PATCH",
+  url: string,
+  fields: LibraryComponentVariantFields,
+  preview?: { bytes: Uint8Array; fileName: string },
+): Promise<PBRecord> {
+  if (!preview) {
+    return pbJson<PBRecord>(
+      url,
+      method,
+      token,
+      fields as unknown as Record<string, unknown>,
+    )
+  }
+
+  const boundary = randomBoundary()
+  const textFields: MultipartField[] = []
+  for (const [key, value] of Object.entries(fields)) {
+    if (value === undefined || value === null) continue
+    const serialized =
+      typeof value === "object" ? JSON.stringify(value) : String(value)
+    textFields.push({ name: key, value: serialized })
+  }
+  const body = buildMultipartBody(boundary, textFields, [
+    {
+      name: "preview",
+      fileName: preview.fileName,
+      contentType: "image/png",
+      bytes: preview.bytes,
+    },
+  ])
+
+  const res = await fetch(url, {
+    method,
+    headers: {
+      ...authHeaders(token),
+      "Content-Type": `multipart/form-data; boundary=${boundary}`,
+    },
+    body: body as unknown as BodyInit,
+  })
+  if (!res.ok) throw new Error(await pbErrorMessage(res))
+  return (await res.json()) as PBRecord
+}
+
+export async function createLibraryComponentVariantRecord(
+  token: string,
+  fields: LibraryComponentVariantFields,
+  preview?: { bytes: Uint8Array; fileName: string },
+): Promise<PBRecord> {
+  return upsertLibraryComponentVariantMultipart(
+    token,
+    "POST",
+    recordsUrl("library_component_variants"),
+    fields,
+    preview,
+  )
+}
+
+export async function updateLibraryComponentVariantRecord(
+  token: string,
+  id: string,
+  fields: LibraryComponentVariantFields,
+  preview?: { bytes: Uint8Array; fileName: string },
+): Promise<PBRecord> {
+  return upsertLibraryComponentVariantMultipart(
+    token,
+    "PATCH",
+    recordsUrl("library_component_variants", id),
+    fields,
+    preview,
+  )
+}
+
+export async function deleteLibraryComponentVariantRecord(
+  token: string,
+  id: string,
+): Promise<void> {
+  const res = await fetch(recordsUrl("library_component_variants", id), {
     method: "DELETE",
     headers: { ...authHeaders(token), "Content-Type": "application/json" },
   })

@@ -1,12 +1,208 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Link, useParams } from "react-router"
-import { ArrowLeft, Box, ExternalLink } from "lucide-react"
-import { useComponentUsages, useLibraryComponent } from "@/hooks/data"
+import { ArrowLeft, Box, ExternalLink, X } from "lucide-react"
+import { InspectorPanel } from "@/features/frames/components/inspector"
+import {
+  useComponentUsages,
+  useLibraryComponent,
+  useLibraryComponentVariants,
+} from "@/hooks/data"
 import { buildFigmaNodeUrl } from "@/lib/figma-url"
-import { libraryComponentPreviewSrc } from "@/lib/files"
-import type { LibraryComponentVariant } from "@/lib/types"
+import {
+  libraryComponentPreviewSrc,
+  libraryComponentVariantPreviewSrc,
+} from "@/lib/files"
+import { transformVariantLayerInspect } from "@/lib/transforms"
+import type {
+  ComponentVariantLayer,
+  LibraryComponentVariantRecord,
+} from "@/lib/types"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { ScrollArea } from "@/components/ui/scroll-area"
+
+function findLayersAtPoint(
+  frameX: number,
+  frameY: number,
+  layers: ComponentVariantLayer[],
+): ComponentVariantLayer[] {
+  return layers.filter((layer) => {
+    const x = layer.x || 0
+    const y = layer.y || 0
+    const w = layer.width || 0
+    const h = layer.height || 0
+    return frameX >= x && frameX <= x + w && frameY >= y && frameY <= y + h
+  })
+}
+
+function paintOrderedLayers(
+  layers: ComponentVariantLayer[],
+): ComponentVariantLayer[] {
+  // Paint order: parents before children (same as frame flatten order).
+  const byParent = new Map<string | undefined, ComponentVariantLayer[]>()
+  for (const layer of layers) {
+    const key = layer.parent
+    const bucket = byParent.get(key)
+    if (bucket) bucket.push(layer)
+    else byParent.set(key, [layer])
+  }
+  for (const bucket of byParent.values()) {
+    bucket.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+  }
+
+  const out: ComponentVariantLayer[] = []
+  const walk = (parentId: string | undefined) => {
+    const children = byParent.get(parentId) ?? []
+    for (const child of children) {
+      out.push(child)
+      walk(child.id)
+    }
+  }
+  walk(undefined)
+  // Orphans (parent missing from payload)
+  for (const layer of layers) {
+    if (!out.includes(layer)) out.push(layer)
+  }
+  return out
+}
+
+const MAX_PREVIEW = 520
+
+function ComponentInspectCanvas({
+  preview,
+  alt,
+  baseWidth,
+  baseHeight,
+  layers,
+  selectedLayerId,
+  hoveredLayerId,
+  contextMenu,
+  onCanvasClick,
+  onContextMenu,
+  onLayerClick,
+  onHoverChange,
+  onPickLayer,
+  canvasRef,
+}: {
+  preview: string | undefined
+  alt: string
+  baseWidth: number
+  baseHeight: number
+  layers: ComponentVariantLayer[]
+  selectedLayerId: string | null
+  hoveredLayerId: string | null
+  contextMenu: {
+    x: number
+    y: number
+    layers: ComponentVariantLayer[]
+  } | null
+  onCanvasClick: (e: React.MouseEvent) => void
+  onContextMenu: (e: React.MouseEvent) => void
+  onLayerClick: (layer: ComponentVariantLayer, e: React.MouseEvent) => void
+  onHoverChange: (id: string | null) => void
+  onPickLayer: (id: string) => void
+  canvasRef: React.RefObject<HTMLDivElement | null>
+}) {
+  const scale =
+    baseWidth > 0 && baseHeight > 0
+      ? Math.min(1, MAX_PREVIEW / Math.max(baseWidth, baseHeight))
+      : 1
+
+  return (
+    <section
+      ref={canvasRef}
+      className="border bg-muted/20 relative flex min-h-[320px] items-center justify-center overflow-auto rounded-lg p-6"
+      onClick={onCanvasClick}
+      onContextMenu={onContextMenu}
+    >
+      {preview && baseWidth > 0 && baseHeight > 0 ? (
+        <div
+          className="relative shrink-0"
+          style={{
+            width: baseWidth * scale,
+            height: baseHeight * scale,
+          }}
+        >
+          <div
+            data-component-transform
+            className="absolute top-0 left-0 shadow-sm"
+            style={{
+              width: baseWidth,
+              height: baseHeight,
+              transform: `scale(${scale})`,
+              transformOrigin: "top left",
+            }}
+          >
+            <img
+              src={preview}
+              alt={alt}
+              draggable={false}
+              className="pointer-events-none block max-w-none select-none"
+              style={{ width: baseWidth, height: baseHeight }}
+            />
+            {layers.map((layer) => {
+              const isSelected = selectedLayerId === layer.id
+              const isHovered = hoveredLayerId === layer.id
+              return (
+                <div
+                  key={layer.id}
+                  data-layer-overlay
+                  className={`absolute transition-colors ${
+                    isSelected
+                      ? "bg-blue-500/10 ring-2 ring-blue-500"
+                      : isHovered
+                        ? "bg-blue-400/5 ring-2 ring-blue-400/50"
+                        : "hover:bg-blue-400/5 hover:ring-2 hover:ring-blue-400/50"
+                  } cursor-pointer`}
+                  style={{
+                    left: layer.x || 0,
+                    top: layer.y || 0,
+                    width: layer.width || 0,
+                    height: layer.height || 0,
+                  }}
+                  onClick={(e) => onLayerClick(layer, e)}
+                  onMouseEnter={() => onHoverChange(layer.id)}
+                  onMouseLeave={() => onHoverChange(null)}
+                  title={layer.name}
+                />
+              )
+            })}
+          </div>
+        </div>
+      ) : preview ? (
+        <img
+          src={preview}
+          alt={alt}
+          className="max-h-[480px] max-w-full object-contain"
+        />
+      ) : (
+        <Box className="text-muted-foreground size-12 opacity-40" />
+      )}
+
+      {contextMenu && (
+        <div
+          className="bg-popover text-popover-foreground fixed z-50 min-w-40 rounded-md border p-1 shadow-md"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {contextMenu.layers.map((layer) => (
+            <button
+              key={layer.id}
+              type="button"
+              className="hover:bg-muted flex w-full flex-col rounded px-2 py-1.5 text-left text-xs"
+              onClick={() => onPickLayer(layer.id)}
+            >
+              <span className="font-medium">{layer.name}</span>
+              <span className="text-muted-foreground font-mono">
+                {layer.type}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
 
 export default function ComponentDetailPage() {
   const { componentKey: rawKey } = useParams<{ componentKey: string }>()
@@ -14,28 +210,130 @@ export default function ComponentDetailPage() {
   const { data: component, isLoading, error } = useLibraryComponent(componentKey)
   const { data: usages, isLoading: loadingUsages } =
     useComponentUsages(componentKey)
+  const { data: variantRows, isLoading: loadingVariants } =
+    useLibraryComponentVariants(component?.id)
 
-  const variants = component?.variants ?? []
   const [activeVariantKey, setActiveVariantKey] = useState<string | null>(null)
+  const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null)
+  const [hoveredLayerId, setHoveredLayerId] = useState<string | null>(null)
+  const [contextMenu, setContextMenu] = useState<{
+    x: number
+    y: number
+    layers: ComponentVariantLayer[]
+  } | null>(null)
+  const canvasRef = useRef<HTMLDivElement>(null)
 
-  const activeVariant: LibraryComponentVariant | undefined = useMemo(() => {
+  const variants = useMemo(() => {
+    if (variantRows && variantRows.length > 0) return variantRows
+    return [] as LibraryComponentVariantRecord[]
+  }, [variantRows])
+
+  const activeVariant = useMemo(() => {
     if (!variants.length) return undefined
     if (activeVariantKey) {
-      return variants.find((v) => v.key === activeVariantKey) ?? variants[0]
+      return (
+        variants.find((v) => v.key === activeVariantKey) ??
+        variants.find((v) => v.is_default) ??
+        variants[0]
+      )
     }
-    return variants[0]
+    return variants.find((v) => v.is_default) ?? variants[0]
   }, [variants, activeVariantKey])
 
-  const preview = component ? libraryComponentPreviewSrc(component) : undefined
+  // Clear selection when switching variants
+  useEffect(() => {
+    setSelectedLayerId(null)
+    setHoveredLayerId(null)
+    setContextMenu(null)
+  }, [activeVariant?.id])
+
+  const layers = useMemo(
+    () => paintOrderedLayers(activeVariant?.layers ?? []),
+    [activeVariant],
+  )
+
+  const selectedLayer = useMemo(
+    () => layers.find((l) => l.id === selectedLayerId) ?? null,
+    [layers, selectedLayerId],
+  )
+
+  const inspected = useMemo(() => {
+    if (!selectedLayer || !activeVariant) return null
+    const detail =
+      activeVariant.layer_details?.[selectedLayer.id] ??
+      activeVariant.layer_details?.[selectedLayer.figma_node_id ?? ""] ??
+      null
+    return transformVariantLayerInspect(selectedLayer, detail)
+  }, [selectedLayer, activeVariant])
+
+  const preview =
+    (activeVariant
+      ? libraryComponentVariantPreviewSrc(activeVariant)
+      : undefined) ||
+    (component ? libraryComponentPreviewSrc(component) : undefined)
+
+  const baseWidth = activeVariant?.width || 0
+  const baseHeight = activeVariant?.height || 0
   const tokens = component?.tokens_used ?? []
 
+  const figmaFileUrl = component?.file_key
+    ? `https://www.figma.com/design/${component.file_key}`
+    : undefined
+
   const figmaUrl =
-    component?.figma_node_id && component.file_key
+    (activeVariant?.figma_node_id || component?.figma_node_id) && figmaFileUrl
       ? buildFigmaNodeUrl(
-          `https://www.figma.com/design/${component.file_key}`,
-          component.figma_node_id,
+          figmaFileUrl,
+          activeVariant?.figma_node_id || component!.figma_node_id!,
         )
       : null
+
+  // Fallback chips from slim JSON when variant rows aren't synced yet
+  const fallbackVariants = component?.variants ?? []
+  const chipVariants =
+    variants.length > 0
+      ? variants.map((v) => ({
+          key: v.key,
+          name: v.name,
+          properties: v.properties ?? {},
+        }))
+      : fallbackVariants.map((v) => ({
+          key: v.key,
+          name: v.name,
+          properties: v.properties ?? {},
+        }))
+
+  function handleCanvasClick(e: React.MouseEvent) {
+    if ((e.target as HTMLElement).closest("[data-layer-overlay]")) return
+    setSelectedLayerId(null)
+    setContextMenu(null)
+  }
+
+  function handleLayerClick(layer: ComponentVariantLayer, e: React.MouseEvent) {
+    e.stopPropagation()
+    setSelectedLayerId(layer.id)
+    setContextMenu(null)
+  }
+
+  function handleContextMenu(e: React.MouseEvent) {
+    e.preventDefault()
+    if (!canvasRef.current || !baseWidth || !baseHeight) return
+    const transformEl = canvasRef.current.querySelector(
+      "[data-component-transform]",
+    ) as HTMLElement | null
+    if (!transformEl) return
+    const rect = transformEl.getBoundingClientRect()
+    const scaleX = rect.width / baseWidth
+    const scaleY = rect.height / baseHeight
+    const frameX = (e.clientX - rect.left) / scaleX
+    const frameY = (e.clientY - rect.top) / scaleY
+    const hits = findLayersAtPoint(frameX, frameY, layers).reverse()
+    if (hits.length === 0) {
+      setContextMenu(null)
+      return
+    }
+    setContextMenu({ x: e.clientX, y: e.clientY, layers: hits })
+  }
 
   if (isLoading) {
     return (
@@ -62,7 +360,12 @@ export default function ComponentDetailPage() {
   return (
     <div className="flex flex-col gap-8 p-6 md:p-8">
       <div className="flex flex-col gap-4">
-        <Button variant="ghost" size="sm" className="w-fit" render={<Link to="/components" />}>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="w-fit"
+          render={<Link to="/components" />}
+        >
           <ArrowLeft className="size-4" />
           Back to Components
         </Button>
@@ -74,11 +377,17 @@ export default function ComponentDetailPage() {
             </h1>
             <div className="flex flex-wrap gap-2">
               <Badge variant="outline">
-                {component.kind === "COMPONENT_SET" ? "Component set" : "Component"}
+                {component.kind === "COMPONENT_SET"
+                  ? "Component set"
+                  : "Component"}
               </Badge>
               <Badge variant="secondary">{component.file_name}</Badge>
+              {component.page_name && (
+                <Badge variant="outline">{component.page_name}</Badge>
+              )}
+              {component.hidden && <Badge variant="secondary">Hidden</Badge>}
               {component.updated && (
-                <span className="text-muted-foreground text-xs self-center">
+                <span className="text-muted-foreground self-center text-xs">
                   Synced{" "}
                   {new Date(component.updated).toLocaleString(undefined, {
                     dateStyle: "medium",
@@ -94,7 +403,13 @@ export default function ComponentDetailPage() {
             )}
           </div>
           {figmaUrl && (
-            <Button variant="outline" size="sm" render={<a href={figmaUrl} target="_blank" rel="noreferrer" />}>
+            <Button
+              variant="outline"
+              size="sm"
+              render={
+                <a href={figmaUrl} target="_blank" rel="noreferrer" />
+              }
+            >
               Open in Figma
               <ExternalLink className="size-3.5" />
             </Button>
@@ -102,40 +417,33 @@ export default function ComponentDetailPage() {
         </header>
       </div>
 
-      <div className="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
-        <section className="border bg-muted/20 flex min-h-[280px] items-center justify-center rounded-lg p-6">
-          {preview ? (
-            <img
-              src={preview}
-              alt={component.name}
-              className="max-h-[480px] max-w-full object-contain"
-            />
-          ) : (
-            <Box className="text-muted-foreground size-12 opacity-40" />
-          )}
-        </section>
-
-        <div className="flex flex-col gap-6">
-          {variants.length > 1 && (
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.4fr)_minmax(280px,0.8fr)]">
+        <div className="flex min-w-0 flex-col gap-4">
+          {chipVariants.length > 1 && (
             <section className="flex flex-col gap-2">
               <h2 className="text-sm font-medium">Variants</h2>
               <div className="flex flex-wrap gap-2">
-                {variants.map((variant) => {
-                  const active = activeVariant?.key === variant.key
+                {chipVariants.map((variant) => {
+                  const isActive =
+                    (activeVariant?.key ?? chipVariants[0]?.key) === variant.key
                   return (
                     <button
                       key={variant.key}
                       type="button"
                       onClick={() => setActiveVariantKey(variant.key)}
                       className={`border rounded-md px-2.5 py-1.5 text-left text-xs transition-colors ${
-                        active
+                        isActive
                           ? "border-foreground bg-foreground text-background"
                           : "hover:border-foreground/30 bg-background"
                       }`}
                     >
                       <span className="font-medium">{variant.name}</span>
                       {Object.keys(variant.properties).length > 0 && (
-                        <span className={active ? "opacity-80" : "text-muted-foreground"}>
+                        <span
+                          className={
+                            isActive ? "opacity-80" : "text-muted-foreground"
+                          }
+                        >
                           {" "}
                           ·{" "}
                           {Object.entries(variant.properties)
@@ -147,12 +455,39 @@ export default function ComponentDetailPage() {
                   )
                 })}
               </div>
-              <p className="text-muted-foreground text-xs">
-                Preview shows the default variant export. Variant chips list
-                properties from Figma.
-              </p>
+              {loadingVariants && (
+                <p className="text-muted-foreground text-xs">
+                  Loading variant previews…
+                </p>
+              )}
+              {!loadingVariants && variants.length === 0 && (
+                <p className="text-muted-foreground text-xs">
+                  Re-sync components from Figma to enable live variant previews
+                  and click-to-inspect.
+                </p>
+              )}
             </section>
           )}
+
+          <ComponentInspectCanvas
+            preview={preview}
+            alt={component.name}
+            baseWidth={baseWidth}
+            baseHeight={baseHeight}
+            layers={layers}
+            selectedLayerId={selectedLayerId}
+            hoveredLayerId={hoveredLayerId}
+            contextMenu={contextMenu}
+            onCanvasClick={handleCanvasClick}
+            onContextMenu={handleContextMenu}
+            onLayerClick={handleLayerClick}
+            onHoverChange={setHoveredLayerId}
+            onPickLayer={(id) => {
+              setSelectedLayerId(id)
+              setContextMenu(null)
+            }}
+            canvasRef={canvasRef}
+          />
 
           <section className="flex flex-col gap-2">
             <h2 className="text-sm font-medium">Tokens used</h2>
@@ -176,12 +511,40 @@ export default function ComponentDetailPage() {
             )}
           </section>
         </div>
+
+        <aside className="border bg-background flex min-h-[280px] flex-col overflow-hidden rounded-lg">
+          <div className="flex items-center justify-between border-b px-3 py-2">
+            <h2 className="text-sm font-medium">Inspector</h2>
+            {selectedLayer && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-7"
+                onClick={() => setSelectedLayerId(null)}
+              >
+                <X className="size-4" />
+              </Button>
+            )}
+          </div>
+          <ScrollArea className="flex-1">
+            {inspected ? (
+              <InspectorPanel layer={inspected} figmaFileUrl={figmaFileUrl} />
+            ) : (
+              <p className="text-muted-foreground p-4 text-sm">
+                Click a layer in the preview to inspect layout, styles, and
+                code.
+              </p>
+            )}
+          </ScrollArea>
+        </aside>
       </div>
 
       <section className="flex flex-col gap-3">
         <h2 className="text-sm font-medium">Used in</h2>
         {loadingUsages && (
-          <p className="text-muted-foreground text-sm">Scanning published screens…</p>
+          <p className="text-muted-foreground text-sm">
+            Scanning published screens…
+          </p>
         )}
         {!loadingUsages && (!usages || usages.length === 0) && (
           <p className="text-muted-foreground text-sm">

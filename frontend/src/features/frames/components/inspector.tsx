@@ -34,6 +34,17 @@ export function Inspector({
   }
   if (!layer) return null
 
+  return <InspectorPanel layer={layer} figmaFileUrl={figmaFileUrl} />
+}
+
+/** Presentational inspector that works with already-transformed layer specs. */
+export function InspectorPanel({
+  layer,
+  figmaFileUrl,
+}: {
+  layer: TransformedLayerDetail
+  figmaFileUrl?: string
+}) {
   const layerFigmaUrl = buildFigmaNodeUrl(figmaFileUrl, layer.figmaNodeId)
 
   return (

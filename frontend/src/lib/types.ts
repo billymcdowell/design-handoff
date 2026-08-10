@@ -169,11 +169,54 @@ export interface LibraryTokenRef {
   name: string
 }
 
-export interface LibraryComponentVariant {
+/** Slim variant summary stored on `library_components.variants`. */
+export interface LibraryComponentVariantSummary {
   key: string
   name: string
   properties: Record<string, string>
   figma_node_id: string
+}
+
+/** @deprecated Prefer LibraryComponentVariantSummary or LibraryComponentVariantRecord */
+export type LibraryComponentVariant = LibraryComponentVariantSummary
+
+/** Flattened overlay row stored on a component variant (not a PB `layers` row). */
+export interface ComponentVariantLayer {
+  id: string
+  parent?: string
+  name: string
+  type: string
+  x?: number
+  y?: number
+  width?: number
+  height?: number
+  clickable?: boolean
+  sort_order?: number
+  figma_node_id?: string
+}
+
+/** Specs keyed by Figma node id on a component variant. */
+export interface ComponentVariantLayerDetail {
+  layout?: LayerDetail["layout"]
+  styles?: LayerDetail["styles"]
+  typography?: LayerDetail["typography"]
+  code?: LayerDetail["code"]
+  component?: LayerDetail["component"]
+}
+
+export interface LibraryComponentVariantRecord extends RecordModel {
+  library_component: string
+  key: string
+  name: string
+  properties?: Record<string, string>
+  figma_node_id?: string
+  is_default?: boolean
+  preview?: string
+  width?: number
+  height?: number
+  layers?: ComponentVariantLayer[]
+  layer_details?: Record<string, ComponentVariantLayerDetail>
+  content_hash?: string
 }
 
 export interface LibraryComponent extends RecordModel {
@@ -183,8 +226,10 @@ export interface LibraryComponent extends RecordModel {
   file_key: string
   file_name: string
   figma_node_id?: string
+  page_name?: string
+  hidden?: boolean
   preview?: string
-  variants?: LibraryComponentVariant[]
+  variants?: LibraryComponentVariantSummary[]
   tokens_used?: LibraryTokenRef[]
   description?: string
   content_hash?: string

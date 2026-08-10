@@ -14,6 +14,7 @@ import {
   getSharedComponentLibrary,
   listLibraryComponents,
   getLibraryComponentByKey,
+  listLibraryComponentVariants,
   findComponentUsages,
 } from "@/lib/api"
 import { sortFramesByDateDesc, dedupeLatestFrames } from "@/lib/frame-utils"
@@ -24,6 +25,7 @@ import type {
   Layer,
   LayerDetail,
   LibraryComponent,
+  LibraryComponentVariantRecord,
   Project,
   Section,
 } from "@/lib/types"
@@ -193,6 +195,14 @@ export function useLibraryComponent(key: string | undefined) {
     () => getLibraryComponentByKey(key!),
     `library-component:${key}`,
     !!key,
+  )
+}
+
+export function useLibraryComponentVariants(componentId: string | undefined) {
+  return useAsync<LibraryComponentVariantRecord[]>(
+    () => listLibraryComponentVariants(componentId!),
+    `library-component-variants:${componentId}`,
+    !!componentId,
   )
 }
 
