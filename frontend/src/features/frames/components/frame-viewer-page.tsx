@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Link, useNavigate } from "react-router"
+import { Link, useNavigate, useSearchParams } from "react-router"
 import {
   ArrowLeft,
+  Box,
   Check,
   Clock,
   ExternalLink,
@@ -15,10 +16,16 @@ import {
   X,
 } from "lucide-react"
 import { FeedbackDialog } from "@/features/feedback/components/feedback-dialog"
+import { FrameComponentsPanel } from "@/features/frames/components/frame-components-panel"
+import {
+  deriveFrameComponentUsages,
+  type FrameComponentUsage,
+} from "@/features/frames/frame-component-usage"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@/components/ui/drawer"
 import {
   AlertDialog,
@@ -31,25 +38,29 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Inspector } from "./inspector"
-import { deleteFrame, getLayerDetails } from "@/lib/api"
+import { deleteFrame, getLayerDetails, type LayerDetailSummary } from "@/lib/api"
 import { frameImageSrc } from "@/lib/files"
 import { frameUploaderLabel } from "@/lib/frame-utils"
 import { copyToClipboard } from "@/lib/clipboard"
 import { copyShareLink, frameShareUrl } from "@/lib/share"
 import { resolveFrameFigmaUrl } from "@/lib/figma-url"
 import { toast } from "@/lib/toast"
+import { useLibraryComponents } from "@/hooks/data"
 import { useIsMobile } from "@/hooks/use-mobile"
 import type { Frame, Layer } from "@/lib/types"
 import { useAuth } from "@/providers/auth-provider"
+import { cn } from "@/lib/utils"
 
 interface FrameViewerPageProps {
   frame: Frame & { layers: Layer[] }
   frameId: string
   projectId: string
-  layerDetailsMap: Record<string, { padding?: { top: number; right: number; bottom: number; left: number } }>
+  layerDetailsMap: Record<string, LayerDetailSummary>
   frameVersions: Frame[]
   allFrames: Frame[]
 }
+
+type RightRailTab = "inspect" | "components"
 
 const ZOOM_MIN = 0.05
 const ZOOM_MAX = 5
@@ -199,8 +210,10 @@ export default function FrameViewerPage({
   frameVersions,
 }: FrameViewerPageProps) {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const isMobile = useIsMobile()
   const { canManage } = useAuth()
+  const { data: libraryComponents } = useLibraryComponents()
 
   const [selectedLayer, setSelectedLayer] = useState<Layer | null>(null)
   const [hoveredLayer, setHoveredLayer] = useState<Layer | null>(null)
@@ -218,8 +231,13 @@ export default function FrameViewerPage({
   const [menuHoveredLayerId, setMenuHoveredLayerId] = useState<string | null>(null)
   const [layerSearch, setLayerSearch] = useState("")
   const [feedbackOpen, setFeedbackOpen] = useState(false)
+  const [rightRailTab, setRightRailTab] = useState<RightRailTab>("inspect")
+  const [highlightedGroupKey, setHighlightedGroupKey] = useState<string | null>(null)
+  const [mobileComponentsOpen, setMobileComponentsOpen] = useState(false)
 
   const canvasRef = useRef<HTMLDivElement>(null)
+  const appliedComponentQuery = useRef<string | null>(null)
+  const highlightMaskId = `component-hl-${frameId}`
   const dragState = useRef<{ active: boolean; startX: number; startY: number; moved: boolean }>({
     active: false,
     startX: 0,
@@ -232,6 +250,34 @@ export default function FrameViewerPage({
 
   const allLayers = useMemo(() => flattenLayers(frame.layers), [frame.layers])
 
+  const componentUsages = useMemo(
+    () => deriveFrameComponentUsages(allLayers, layerDetailsMap, libraryComponents),
+    [allLayers, layerDetailsMap, libraryComponents],
+  )
+
+  const highlightedLayerIds = useMemo(() => {
+    if (!highlightedGroupKey) return null
+    const usage = componentUsages.find((u) => u.groupKey === highlightedGroupKey)
+    return usage ? new Set(usage.layerIds) : null
+  }, [highlightedGroupKey, componentUsages])
+
+  // Deep link: ?component=KEY → Components tab + highlight (highlight waits for usages)
+  useEffect(() => {
+    const key = searchParams.get("component")
+    if (!key) return
+
+    if (appliedComponentQuery.current !== key) {
+      appliedComponentQuery.current = key
+      setRightRailTab("components")
+      if (isMobile) setMobileComponentsOpen(true)
+    }
+
+    const match =
+      componentUsages.find((u) => u.catalogKey === key || u.groupKey === key) ??
+      null
+    if (match) setHighlightedGroupKey(match.groupKey)
+  }, [searchParams, componentUsages, isMobile])
+
   const visibleLayers = useMemo(() => {
     if (!layerSearch.trim()) return allLayers
     const q = layerSearch.toLowerCase()
@@ -241,6 +287,30 @@ export default function FrameViewerPage({
   }, [allLayers, layerSearch])
 
   const isOlderVersion = frameVersions.length > 1 && frameVersions[0]?.id !== frameId
+
+  const clearComponentQuery = useCallback(() => {
+    if (!searchParams.has("component")) return
+    const next = new URLSearchParams(searchParams)
+    next.delete("component")
+    setSearchParams(next, { replace: true })
+  }, [searchParams, setSearchParams])
+
+  const handleComponentUsageSelect = useCallback(
+    (usage: FrameComponentUsage | null) => {
+      setHighlightedGroupKey(usage?.groupKey ?? null)
+      if (!usage) {
+        clearComponentQuery()
+        return
+      }
+      if (usage.catalogKey && searchParams.get("component") !== usage.catalogKey) {
+        const next = new URLSearchParams(searchParams)
+        next.set("component", usage.catalogKey)
+        setSearchParams(next, { replace: true })
+        appliedComponentQuery.current = usage.catalogKey
+      }
+    },
+    [clearComponentQuery, searchParams, setSearchParams],
+  )
 
   // Fit frame into the canvas once per frame. The transform node must keep its
   // design-pixel size (never flex-shrink) so layer overlays stay aligned with
@@ -279,6 +349,9 @@ export default function FrameViewerPage({
 
   const handleLayerClick = (layer: Layer, e: React.MouseEvent) => {
     e.stopPropagation()
+    setHighlightedGroupKey(null)
+    clearComponentQuery()
+    setRightRailTab("inspect")
     setSelectedLayer((prev) => (prev?.id === layer.id ? prev : layer))
   }
 
@@ -286,6 +359,8 @@ export default function FrameViewerPage({
     if (dragState.current.moved) return
     setSelectedLayer(null)
     setContextMenuOpen(false)
+    setHighlightedGroupKey(null)
+    clearComponentQuery()
   }
 
   const handleLayerDoubleClick = async (layer: Layer, e: React.MouseEvent) => {
@@ -457,6 +532,21 @@ export default function FrameViewerPage({
             <MessageSquarePlus className="size-4" />
             Feedback
           </Button>
+          {isMobile && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setMobileComponentsOpen(true)}
+            >
+              <Box className="size-4" />
+              Components
+              {componentUsages.length > 0 && (
+                <Badge variant="secondary" className="ml-1 text-[10px]">
+                  {componentUsages.length}
+                </Badge>
+              )}
+            </Button>
+          )}
           <Button
             variant="outline"
             size="sm"
@@ -616,21 +706,59 @@ export default function FrameViewerPage({
                     style={{ width: baseWidth, height: baseHeight }}
                   />
 
+                  {highlightedLayerIds && (
+                    <svg
+                      className="pointer-events-none absolute inset-0"
+                      width={baseWidth}
+                      height={baseHeight}
+                      aria-hidden
+                    >
+                      <defs>
+                        <mask id={highlightMaskId}>
+                          <rect width={baseWidth} height={baseHeight} fill="white" />
+                          {allLayers
+                            .filter((l) => highlightedLayerIds.has(l.id))
+                            .map((l) => (
+                              <rect
+                                key={l.id}
+                                x={l.x || 0}
+                                y={l.y || 0}
+                                width={l.width || 0}
+                                height={l.height || 0}
+                                fill="black"
+                              />
+                            ))}
+                        </mask>
+                      </defs>
+                      <rect
+                        width={baseWidth}
+                        height={baseHeight}
+                        fill="rgba(0,0,0,0.4)"
+                        mask={`url(#${highlightMaskId})`}
+                      />
+                    </svg>
+                  )}
+
                   {/* Layer overlays */}
                   {visibleLayers.map((layer) => {
                     const isSelected = selectedLayer?.id === layer.id
                     const isMenuHovered = menuHoveredLayerId === layer.id
+                    const isComponentMatch = highlightedLayerIds?.has(layer.id) ?? false
                     return (
                       <div
                         key={layer.id}
                         data-layer-overlay
-                        className={`absolute transition-colors ${
+                        className={cn(
+                          "absolute transition-colors",
                           isSelected
-                            ? "bg-blue-500/10 ring-2 ring-blue-500"
+                            ? "z-10 bg-blue-500/10 ring-2 ring-blue-500"
                             : isMenuHovered
-                              ? "bg-yellow-400/20 ring-2 ring-yellow-400"
-                              : "hover:bg-blue-400/5 hover:ring-2 hover:ring-blue-400/50"
-                        } ${layer.type === "TEXT" ? "cursor-text" : "cursor-pointer"}`}
+                              ? "z-10 bg-yellow-400/20 ring-2 ring-yellow-400"
+                              : isComponentMatch
+                                ? "z-10 bg-violet-500/15 ring-2 ring-violet-500"
+                                : "hover:bg-blue-400/5 hover:ring-2 hover:ring-blue-400/50",
+                          layer.type === "TEXT" ? "cursor-text" : "cursor-pointer",
+                        )}
                         style={{
                           left: layer.x || 0,
                           top: layer.y || 0,
@@ -686,17 +814,67 @@ export default function FrameViewerPage({
           </div>
         </div>
 
-        {/* Inspector — desktop right sidebar */}
-        {selectedLayer && !isMobile && (
+        {/* Right rail — desktop */}
+        {!isMobile && (
           <aside className="bg-background flex w-80 shrink-0 flex-col border-l">
-            <div className="flex items-center justify-end border-b px-2 py-1">
-              <Button variant="ghost" size="icon" onClick={() => setSelectedLayer(null)}>
-                <X className="size-4" />
-              </Button>
-            </div>
-            <ScrollArea className="flex-1">
-              <Inspector layerId={selectedLayer.id} figmaFileUrl={figmaFileUrl} />
-            </ScrollArea>
+            <Tabs
+              value={rightRailTab}
+              onValueChange={(v) => setRightRailTab(v as RightRailTab)}
+              className="flex min-h-0 flex-1 flex-col gap-0"
+            >
+              <div className="flex items-center gap-1 border-b px-2 py-1.5">
+                <TabsList variant="default" className="h-8 flex-1">
+                  <TabsTrigger value="inspect" className="text-xs">
+                    Inspect
+                  </TabsTrigger>
+                  <TabsTrigger value="components" className="text-xs">
+                    Components
+                    {componentUsages.length > 0 && (
+                      <span className="text-muted-foreground ml-1 tabular-nums">
+                        {componentUsages.length}
+                      </span>
+                    )}
+                  </TabsTrigger>
+                </TabsList>
+                {selectedLayer && rightRailTab === "inspect" && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-8 shrink-0"
+                    onClick={() => setSelectedLayer(null)}
+                  >
+                    <X className="size-4" />
+                  </Button>
+                )}
+              </div>
+              <TabsContent
+                value="inspect"
+                className="mt-0 min-h-0 flex-1 overflow-hidden data-[hidden]:hidden"
+              >
+                <ScrollArea className="h-full">
+                  {selectedLayer ? (
+                    <Inspector layerId={selectedLayer.id} figmaFileUrl={figmaFileUrl} />
+                  ) : (
+                    <p className="text-muted-foreground p-4 text-sm">
+                      Select a layer on the canvas to inspect layout, styles, and
+                      code.
+                    </p>
+                  )}
+                </ScrollArea>
+              </TabsContent>
+              <TabsContent
+                value="components"
+                className="mt-0 min-h-0 flex-1 overflow-hidden data-[hidden]:hidden"
+              >
+                <ScrollArea className="h-full">
+                  <FrameComponentsPanel
+                    usages={componentUsages}
+                    selectedGroupKey={highlightedGroupKey}
+                    onSelect={handleComponentUsageSelect}
+                  />
+                </ScrollArea>
+              </TabsContent>
+            </Tabs>
           </aside>
         )}
       </div>
@@ -712,6 +890,24 @@ export default function FrameViewerPage({
               {selectedLayer && (
                 <Inspector layerId={selectedLayer.id} figmaFileUrl={figmaFileUrl} />
               )}
+            </div>
+          </DrawerContent>
+        </Drawer>
+      )}
+
+      {/* Components — mobile drawer */}
+      {isMobile && (
+        <Drawer open={mobileComponentsOpen} onOpenChange={setMobileComponentsOpen}>
+          <DrawerContent className="h-[70vh]">
+            <DrawerHeader>
+              <DrawerTitle>Components in this screen</DrawerTitle>
+            </DrawerHeader>
+            <div className="min-h-0 flex-1 overflow-auto">
+              <FrameComponentsPanel
+                usages={componentUsages}
+                selectedGroupKey={highlightedGroupKey}
+                onSelect={handleComponentUsageSelect}
+              />
             </div>
           </DrawerContent>
         </Drawer>
@@ -733,6 +929,9 @@ export default function FrameViewerPage({
                 onMouseEnter={() => setMenuHoveredLayerId(layer.id)}
                 onMouseLeave={() => setMenuHoveredLayerId(null)}
                 onClick={() => {
+                  setHighlightedGroupKey(null)
+                  clearComponentQuery()
+                  setRightRailTab("inspect")
                   setSelectedLayer(layer)
                   setContextMenuOpen(false)
                   setMenuHoveredLayerId(null)

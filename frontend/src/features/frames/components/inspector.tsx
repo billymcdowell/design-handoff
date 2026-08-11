@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react"
 import { Link } from "react-router"
 import { Copy, Check, ExternalLink } from "lucide-react"
+import { catalogKeyFor } from "@/features/components/catalog-key"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -105,17 +106,6 @@ export function InspectorPanel({
         </TabsContent>
       </Tabs>
     </div>
-  )
-}
-
-function catalogKeyFor(
-  component: NonNullable<TransformedLayerDetail["component"]>,
-): string | undefined {
-  return (
-    component.componentSetKey ||
-    component.mainComponentKey ||
-    component.componentKey ||
-    undefined
   )
 }
 

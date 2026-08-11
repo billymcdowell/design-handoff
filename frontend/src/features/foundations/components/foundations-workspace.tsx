@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Link, useSearchParams } from "react-router"
 import {
   AlertDialog,
@@ -124,6 +124,17 @@ export function FoundationsWorkspace({
     : null
   const selectedModeId = selected ? modeIdForToken(selected) : listModeId
   const referrers = selected ? findReferrers(catalog, selected) : []
+  const selectedRowRef = useRef<HTMLButtonElement | null>(null)
+
+  // Deep-link / selection changes: keep the active row visible in the list.
+  useEffect(() => {
+    if (!selected?.id || workspace !== "catalog") return
+    const el = selectedRowRef.current
+    if (!el) return
+    requestAnimationFrame(() => {
+      el.scrollIntoView({ behavior: "smooth", block: "center" })
+    })
+  }, [selected?.id, workspace, scoped])
 
   function setWorkspace(ws: Workspace) {
     const next = new URLSearchParams(searchParams)
@@ -357,6 +368,7 @@ export function FoundationsWorkspace({
                   return (
                     <button
                       key={t.id}
+                      ref={selected?.id === t.id ? selectedRowRef : undefined}
                       type="button"
                       onClick={() => pickToken(t.id)}
                       className={cn(

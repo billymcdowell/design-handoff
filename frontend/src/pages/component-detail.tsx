@@ -557,7 +557,7 @@ export default function ComponentDetailPage() {
             {usages.map((usage) => (
               <li key={`${usage.frameId}-${usage.layerId}`}>
                 <Link
-                  to={`/frame/${usage.frameId}`}
+                  to={`/frame/${usage.frameId}?projectId=${encodeURIComponent(usage.projectId)}&component=${encodeURIComponent(componentKey!)}`}
                   className="hover:bg-muted/40 flex flex-col gap-0.5 px-4 py-3 transition-colors sm:flex-row sm:items-center sm:justify-between"
                 >
                   <div className="min-w-0">

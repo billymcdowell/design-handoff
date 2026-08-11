@@ -228,16 +228,27 @@ export async function getLayerDetails(layerId: string): Promise<LayerDetail | nu
   }
 }
 
-/** Batch-fetch padding for many layers in one filtered query (avoids N+1). */
+export type LayerDetailSummary = {
+  padding?: { top: number; right: number; bottom: number; left: number }
+  component?: LayerDetail["component"]
+}
+
+/** Batch-fetch padding + component specs for many layers in one filtered query (avoids N+1). */
 export async function getLayerPaddingMap(
   layerIds: string[]
-): Promise<Record<string, { padding?: { top: number; right: number; bottom: number; left: number } }>> {
+): Promise<Record<string, LayerDetailSummary>> {
   if (layerIds.length === 0) return {}
   const filter = layerIds.map((id) => `layer = "${escapeFilterValue(id)}"`).join(" || ")
   const details = await pb.collection("layer_details").getFullList<LayerDetail>({ filter })
-  const map: Record<string, { padding?: { top: number; right: number; bottom: number; left: number } }> = {}
+  const map: Record<string, LayerDetailSummary> = {}
   for (const d of details) {
-    if (d.layout?.padding) map[d.layer] = { padding: d.layout.padding }
+    const padding = d.layout?.padding
+    const component = d.component
+    if (!padding && !component) continue
+    map[d.layer] = {
+      ...(padding ? { padding } : {}),
+      ...(component ? { component } : {}),
+    }
   }
   return map
 }
