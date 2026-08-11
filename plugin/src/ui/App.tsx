@@ -19,6 +19,7 @@ export function App() {
   const [canPublish, setCanPublish] = useState(false)
   const [loading, setLoading] = useState(true)
   const [selectionCount, setSelectionCount] = useState(0)
+  const [duplicateNames, setDuplicateNames] = useState<string[]>([])
   const [isPublishing, setIsPublishing] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
   const [isSyncingComponents, setIsSyncingComponents] = useState(false)
@@ -63,6 +64,11 @@ export function App() {
     switch (msg.type) {
       case "SELECTION_CHANGED":
         setSelectionCount(msg.count as number)
+        setDuplicateNames(
+          Array.isArray(msg.duplicateNames)
+            ? (msg.duplicateNames as string[])
+            : [],
+        )
         break
 
       case "AUTH_RESULT": {
@@ -312,6 +318,7 @@ export function App() {
     setAuthMethod(null)
     setFoundationsNote(null)
     setComponentsNote(null)
+    setDuplicateNames([])
   }
 
   // ── View routing (7.3) ──────────────────────────────────────────────────────
@@ -337,6 +344,7 @@ export function App() {
       selectedProjectId={selectedProjectId}
       setSelectedProjectId={setSelectedProjectId}
       selectionCount={selectionCount}
+      duplicateNames={duplicateNames}
       framesUsed={framesUsed}
       displayName={displayName || "User"}
       canPublish={canPublish}
@@ -480,6 +488,7 @@ function DashboardView(props: {
   selectedProjectId: string
   setSelectedProjectId: (v: string) => void
   selectionCount: number
+  duplicateNames: string[]
   framesUsed: number
   displayName: string
   canPublish: boolean
@@ -499,6 +508,7 @@ function DashboardView(props: {
     selectedProjectId,
     setSelectedProjectId,
     selectionCount,
+    duplicateNames,
     framesUsed,
     displayName,
     canPublish,
@@ -513,8 +523,13 @@ function DashboardView(props: {
     onLogout,
   } = props
 
+  const hasDuplicateNames = duplicateNames.length > 0
   const publishDisabled =
-    !canPublish || selectionCount === 0 || !selectedProjectId || isPublishing
+    !canPublish ||
+    selectionCount === 0 ||
+    hasDuplicateNames ||
+    !selectedProjectId ||
+    isPublishing
   const foundationalDisabled = !canPublish || isExporting || isSyncingComponents
   const componentsDisabled = !canPublish || isExporting || isSyncingComponents
 
@@ -564,13 +579,18 @@ function DashboardView(props: {
       <div className="card center">
         {selectionCount === 0 ? (
           <p className="small">Select a frame to publish</p>
+        ) : hasDuplicateNames ? (
+          <p className="small error">
+            Duplicate frame names: {duplicateNames.join(", ")}. Rename them to
+            unique names before publishing.
+          </p>
         ) : (
           <p className="small">{selectionCount} frame(s) selected</p>
         )}
       </div>
 
       <button className="primary" disabled={publishDisabled} onClick={onPublish}>
-        {isPublishing ? "Processing..." : "Publish to Dev Handoff"}
+        {isPublishing ? "Processing..." : "Publish"}
       </button>
       <button disabled={foundationalDisabled} onClick={onExportFoundational}>
         {isExporting ? "Syncing foundations..." : "Sync foundations"}
@@ -637,6 +657,10 @@ function ProgressView(props: {
     }, 1500)
   }
 
+  function openUrl(url: string) {
+    post({ type: "OPEN_EXTERNAL", url })
+  }
+
   if (progress.status === "complete") {
     const uploaded = progress.uploadedFrames ?? []
     const skipped = progress.skippedFrames ?? []
@@ -668,11 +692,6 @@ function ProgressView(props: {
           {uploaded.length === 0 && skipped.length === 0 && (
             <span className="small">Total items processed: {progress.total}</span>
           )}
-          {progress.apiCallCount !== undefined && (
-            <span className="small">
-              Total API calls made: {progress.apiCallCount}
-            </span>
-          )}
         </div>
         {uploaded.length > 0 && (
           <div className="card share-card" style={{ width: "100%" }}>
@@ -697,13 +716,44 @@ function ProgressView(props: {
                       {frame.url}
                     </span>
                   </div>
-                  <button
-                    type="button"
-                    className="share-copy"
-                    onClick={() => copyText(frame.id, frame.url)}
-                  >
-                    {copiedKey === frame.id ? "Copied!" : "Copy"}
-                  </button>
+                  <div className="share-actions">
+                    <button
+                      type="button"
+                      className="share-copy"
+                      onClick={() => copyText(frame.id, frame.url)}
+                    >
+                      {copiedKey === frame.id ? "Copied!" : "Copy"}
+                    </button>
+                    <button
+                      type="button"
+                      className="share-open"
+                      title="Open in browser"
+                      aria-label={`Open ${frame.name} in browser`}
+                      onClick={() => openUrl(frame.url)}
+                    >
+                      <svg
+                        width="14"
+                        height="14"
+                        viewBox="0 0 16 16"
+                        fill="none"
+                        aria-hidden="true"
+                      >
+                        <path
+                          d="M6.5 3.5H3.5A1 1 0 0 0 2.5 4.5v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-3"
+                          stroke="currentColor"
+                          strokeWidth="1.5"
+                          strokeLinecap="round"
+                        />
+                        <path
+                          d="M9.5 2.5h4v4M13.5 2.5l-6 6"
+                          stroke="currentColor"
+                          strokeWidth="1.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </button>
+                  </div>
                 </li>
               ))}
             </ul>

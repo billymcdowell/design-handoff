@@ -259,3 +259,26 @@ button.primary {
   padding: 6px 10px;
   font-size: 11px;
 }
+.share-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.share-open {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.share-open:hover {
+  color: var(--text);
+  border-color: var(--text-secondary);
+}

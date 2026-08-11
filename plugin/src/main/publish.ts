@@ -30,6 +30,21 @@ export function isPublishableFrame(node: SceneNode): boolean {
   return VALID_FRAME_TYPES.includes(node.type)
 }
 
+/**
+ * Names that appear more than once among the given frames (exact match).
+ * Used to block a multi-select publish that would create multiple versions
+ * under the same screen name.
+ */
+export function findDuplicateFrameNames(frames: SceneNode[]): string[] {
+  const counts = new Map<string, number>()
+  for (const frame of frames) {
+    counts.set(frame.name, (counts.get(frame.name) ?? 0) + 1)
+  }
+  return [...counts.entries()]
+    .filter(([, count]) => count > 1)
+    .map(([name]) => name)
+}
+
 /** Walk parents until a PAGE node is found. */
 export function resolvePageName(node: BaseNode): string | undefined {
   let current: BaseNode | null = node

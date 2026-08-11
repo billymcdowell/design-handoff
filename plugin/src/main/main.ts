@@ -37,7 +37,11 @@ import {
   upsertSharedFoundationRecord,
   validateAuthToken,
 } from "./pbClient"
-import { createBackendPayload, isPublishableFrame } from "./publish"
+import {
+  createBackendPayload,
+  findDuplicateFrameNames,
+  isPublishableFrame,
+} from "./publish"
 import { uploadData } from "./upload"
 
 async function syncLibraryComponentVariants(
@@ -99,15 +103,19 @@ async function syncLibraryComponentVariants(
 figma.showUI(__html__, { width: 400, height: 600, themeColors: true })
 
 // Selection listener — register immediately.
-function publishableSelectionCount(): number {
-  return figma.currentPage.selection.filter(isPublishableFrame).length
+function publishableSelection(): SceneNode[] {
+  return figma.currentPage.selection.filter(isPublishableFrame)
 }
-figma.on("selectionchange", () => {
+
+function postSelectionChanged() {
+  const frames = publishableSelection()
   figma.ui.postMessage({
     type: "SELECTION_CHANGED",
-    count: publishableSelectionCount(),
+    count: frames.length,
+    duplicateNames: findDuplicateFrameNames(frames),
   })
-})
+}
+figma.on("selectionchange", postSelectionChanged)
 
 /** Shared cancel flag for in-flight Microsoft OAuth polling. */
 let oauthCancel: { cancelled: boolean } | null = null
@@ -344,6 +352,20 @@ figma.ui.onmessage = async (msg: Msg) => {
             "❌ Please select at least one frame, component, or instance.",
           )
           figma.ui.postMessage({ type: "PUBLISH_COMPLETE", success: false })
+          return
+        }
+
+        const duplicateNames = findDuplicateFrameNames(frames)
+        if (duplicateNames.length > 0) {
+          const list = duplicateNames.join(", ")
+          figma.notify(
+            `❌ Duplicate frame names: ${list}. Rename them to unique names before publishing.`,
+          )
+          figma.ui.postMessage({
+            type: "PUBLISH_COMPLETE",
+            success: false,
+            error: `Duplicate frame names: ${list}. Rename them to unique names before publishing.`,
+          })
           return
         }
 
@@ -714,6 +736,14 @@ figma.ui.onmessage = async (msg: Msg) => {
 
     case "NOTIFY": {
       figma.notify(msg.message as string)
+      break
+    }
+
+    case "OPEN_EXTERNAL": {
+      const url = typeof msg.url === "string" ? msg.url.trim() : ""
+      if (/^https?:\/\//i.test(url)) {
+        figma.openExternal(url)
+      }
       break
     }
 

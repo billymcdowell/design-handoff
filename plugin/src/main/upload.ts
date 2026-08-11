@@ -311,10 +311,10 @@ export async function uploadData(
       )
     } else if (skippedFrames.length > 0) {
       figma.notify(
-        `🚀 Published ${uploadedFrames.length}; skipped ${skippedFrames.length} unchanged (${apiCallCount} API calls)`,
+        `🚀 Published ${uploadedFrames.length}; skipped ${skippedFrames.length} unchanged`,
       )
     } else {
-      figma.notify(`🚀 Published successfully! (${apiCallCount} API calls)`)
+      figma.notify("🚀 Published successfully!")
     }
 
     return {
