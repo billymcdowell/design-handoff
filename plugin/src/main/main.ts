@@ -40,6 +40,7 @@ import {
 import {
   createBackendPayload,
   findDuplicateFrameNames,
+  formatDuplicateFrameNamesMessage,
   isPublishableFrame,
 } from "./publish"
 import { uploadData } from "./upload"
@@ -116,6 +117,8 @@ function postSelectionChanged() {
   })
 }
 figma.on("selectionchange", postSelectionChanged)
+// Report the current selection as soon as the UI can receive messages.
+postSelectionChanged()
 
 /** Shared cancel flag for in-flight Microsoft OAuth polling. */
 let oauthCancel: { cancelled: boolean } | null = null
@@ -357,14 +360,12 @@ figma.ui.onmessage = async (msg: Msg) => {
 
         const duplicateNames = findDuplicateFrameNames(frames)
         if (duplicateNames.length > 0) {
-          const list = duplicateNames.join(", ")
-          figma.notify(
-            `❌ Duplicate frame names: ${list}. Rename them to unique names before publishing.`,
-          )
+          const message = formatDuplicateFrameNamesMessage(duplicateNames)
+          figma.notify(`❌ ${message}`)
           figma.ui.postMessage({
             type: "PUBLISH_COMPLETE",
             success: false,
-            error: `Duplicate frame names: ${list}. Rename them to unique names before publishing.`,
+            error: message,
           })
           return
         }

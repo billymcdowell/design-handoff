@@ -581,8 +581,27 @@ function DashboardView(props: {
           <p className="small">Select a frame to publish</p>
         ) : hasDuplicateNames ? (
           <p className="small error">
-            Duplicate frame names: {duplicateNames.join(", ")}. Rename them to
-            unique names before publishing.
+            {duplicateNames.length === 1 ? (
+              <>
+                The frame name{" "}
+                <strong>&ldquo;{duplicateNames[0] || "(unnamed)"}&rdquo;</strong>{" "}
+                is used more than once. Rename frames so each name is unique
+                before publishing.
+              </>
+            ) : (
+              <>
+                These frame names are used more than once:{" "}
+                <strong>
+                  {duplicateNames.map((name, index) => (
+                    <span key={`${name}-${index}`}>
+                      {index > 0 ? ", " : null}
+                      &ldquo;{name || "(unnamed)"}&rdquo;
+                    </span>
+                  ))}
+                </strong>
+                . Rename frames so each name is unique before publishing.
+              </>
+            )}
           </p>
         ) : (
           <p className="small">{selectionCount} frame(s) selected</p>

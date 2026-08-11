@@ -45,6 +45,16 @@ export function findDuplicateFrameNames(frames: SceneNode[]): string[] {
     .map(([name]) => name)
 }
 
+/** Human-readable publish block when selected frames share names. */
+export function formatDuplicateFrameNamesMessage(names: string[]): string {
+  if (names.length === 0) return ""
+  const quoted = names.map((name) => `"${name || "(unnamed)"}"`).join(", ")
+  if (names.length === 1) {
+    return `The frame name ${quoted} is used more than once. Rename frames so each name is unique before publishing.`
+  }
+  return `These frame names are used more than once: ${quoted}. Rename frames so each name is unique before publishing.`
+}
+
 /** Walk parents until a PAGE node is found. */
 export function resolvePageName(node: BaseNode): string | undefined {
   let current: BaseNode | null = node
